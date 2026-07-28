@@ -1,9 +1,9 @@
 {
   "Name": "Timberborn HD",
-  "Version": "0.8.0",
+  "Version": "0.8.1",
   "Id": "rockmandew.TimberbornHD",
   "MinimumGameVersion": "1.0.0.0",
-  "Description": "Adds refined 2K terrain materials and UV-preserving runtime 2K textures for all tree species.",
+  "Description": "Adds refined 2K terrain and tree textures plus local terrain-channel diagnostics.",
   "RequiredMods": [],
   "OptionalMods": []
 }

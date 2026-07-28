@@ -30,6 +30,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const string VegetationAlbedoProperty = "_MainTex";
     private const string VegetationNormalProperty = "_BumpMap";
     private const string TreeDumpDirectoryName = "TextureDumps/Trees";
+    private const string TerrainDumpDirectoryName = "TextureDumps/Terrain";
 
     private static readonly TreeTextureSpecification[] TreeTextureSpecifications =
     {
@@ -60,6 +61,18 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         "Pine_D",
         "Pine_N",
         "Pine_Detail"
+    };
+
+    private static readonly HashSet<string> TerrainTextureNames = new()
+    {
+        "CliffDetail",
+        "CliffMask",
+        "Cliff_N",
+        "DryField",
+        "GrassDetailsAlbedo",
+        "Ground",
+        "SlopeDetailAlbedo",
+        "SlopeSand"
     };
 
     public static GraphicsEnhancer? Instance { get; private set; }
@@ -115,6 +128,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         WriteTextureInventory();
         WriteMaterialInventory();
         WriteTreeTextureDumps();
+        WriteTerrainTextureDumps();
     }
 
     private static void ApplyTextureQuality()
@@ -496,6 +510,43 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         catch (System.Exception exception)
         {
             Debug.LogWarning($"[Timberborn HD] Could not export tree reference textures: {exception.Message}");
+        }
+    }
+
+    private static void WriteTerrainTextureDumps()
+    {
+        if (string.IsNullOrWhiteSpace(_modPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var dumpDirectory = Path.Combine(_modPath, TerrainDumpDirectoryName);
+            Directory.CreateDirectory(dumpDirectory);
+            var dumpedTextures = 0;
+            var textures = Resources.FindObjectsOfTypeAll<Texture2D>()
+                .Where(texture => texture != null && TerrainTextureNames.Contains(texture.name))
+                .GroupBy(texture => texture.name)
+                .Select(group => group.OrderByDescending(texture => texture.width * texture.height).First());
+
+            foreach (var texture in textures)
+            {
+                var dumpPath = Path.Combine(dumpDirectory, $"{texture.name}.png");
+                if (File.Exists(dumpPath))
+                {
+                    continue;
+                }
+
+                WriteTextureAsPng(texture, dumpPath);
+                dumpedTextures++;
+            }
+
+            Debug.Log($"[Timberborn HD] Exported {dumpedTextures} terrain reference textures to {dumpDirectory}");
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning($"[Timberborn HD] Could not export terrain reference textures: {exception.Message}");
         }
     }
 

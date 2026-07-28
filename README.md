@@ -79,10 +79,11 @@ After entering a map, the mod writes deduplicated `TimberbornHD-textures.csv` an
 live textures, materials, shaders, and texture-property bindings so replacement
 materials can target exact game assets without unsafe guesses.
 
-Version 0.5 and later also export the loaded tree atlases once to
-`TextureDumps/Trees` inside the installed mod directory. These local reference
-files preserve Timberborn's exact UV layout for the upcoming 2K tree pass and
-are excluded from this repository and release packages.
+Version 0.5 and later export loaded reference maps once inside the installed
+mod's `TextureDumps` directory. Tree atlases preserve exact UV layouts, while
+the terrain-channel dump identifies how Timberborn combines albedo, splat,
+mask, detail, and normal maps. These files remain local and are excluded from
+this repository and release packages.
 
 Version 0.7 applies the tree pass to pine, oak, maple, birch, and chestnut. It
 creates sharpened 2K albedo and renormalized 2K normal atlases in memory from
