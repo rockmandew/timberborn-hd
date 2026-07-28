@@ -1,9 +1,9 @@
 {
   "Name": "Timberborn HD",
-  "Version": "0.3.0",
+  "Version": "0.4.0",
   "Id": "rockmandew.TimberbornHD",
   "MinimumGameVersion": "1.0.0.0",
-  "Description": "Improves world texture clarity and replaces DirtURP terrain with an original seamless 2K soil material.",
+  "Description": "Improves world texture clarity with original seamless 2K dirt, dry-ground, and grass materials.",
   "RequiredMods": [],
   "OptionalMods": []
 }

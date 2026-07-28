@@ -18,10 +18,21 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const string DirtTextureProperty = "_MainTex";
     private const string OriginalDirtTextureName = "Dirt";
     private const string SoilAlbedoRelativePath = "Textures/Soil/soil-neutral-albedo.png";
+    private const string TerrainShaderName = "Shader Graphs/TerrainURP";
+    private const string TerrainBaseAlbedoProperty = "_BaseAlbedoTex";
+    private const string TerrainNormalProperty = "_Normalmap";
+    private const string OriginalGrassTextureName = "Grass";
+    private const string GrassAlbedoRelativePath = "Textures/Terrain/grass-natural-albedo.png";
+    private const string GrassNormalRelativePath = "Textures/Terrain/grass-natural-normal.png";
+    private const string OriginalGroundTextureName = "Ground";
+    private const string DryGroundAlbedoRelativePath = "Textures/Terrain/ground-dry-albedo.png";
 
     public static GraphicsEnhancer? Instance { get; private set; }
     private static string? _modPath;
     private static Texture2D? _soilAlbedo;
+    private static Texture2D? _grassAlbedo;
+    private static Texture2D? _grassNormal;
+    private static Texture2D? _dryGroundAlbedo;
 
     public static void Configure(string modPath)
     {
@@ -90,18 +101,38 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
     private static void LoadReplacementTextures()
     {
-        if (string.IsNullOrWhiteSpace(_modPath) || _soilAlbedo != null)
+        if (string.IsNullOrWhiteSpace(_modPath))
         {
             return;
         }
 
+        _soilAlbedo ??= LoadTexture(
+            SoilAlbedoRelativePath,
+            "TimberbornHD_SoilNeutral_Albedo",
+            linear: false);
+        _grassAlbedo ??= LoadTexture(
+            GrassAlbedoRelativePath,
+            "TimberbornHD_GrassNatural_Albedo",
+            linear: false);
+        _grassNormal ??= LoadTexture(
+            GrassNormalRelativePath,
+            "TimberbornHD_GrassNatural_Normal",
+            linear: true);
+        _dryGroundAlbedo ??= LoadTexture(
+            DryGroundAlbedoRelativePath,
+            "TimberbornHD_GroundDry_Albedo",
+            linear: false);
+    }
+
+    private static Texture2D? LoadTexture(string relativePath, string textureName, bool linear)
+    {
         try
         {
-            var texturePath = Path.Combine(_modPath, SoilAlbedoRelativePath);
+            var texturePath = Path.Combine(_modPath!, relativePath);
             var textureBytes = File.ReadAllBytes(texturePath);
-            var texture = new Texture2D(2, 2, TextureFormat.RGB24, true, false)
+            var texture = new Texture2D(2, 2, TextureFormat.RGB24, true, linear)
             {
-                name = "TimberbornHD_SoilNeutral_Albedo",
+                name = textureName,
                 wrapMode = TextureWrapMode.Repeat,
                 filterMode = FilterMode.Trilinear,
                 anisoLevel = MaximumAnisotropicLevel
@@ -113,46 +144,76 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                 throw new InvalidDataException($"Unity could not decode {texturePath}.");
             }
 
-            _soilAlbedo = texture;
-            Debug.Log($"[Timberborn HD] Loaded 2K soil albedo from {texturePath}");
+            Debug.Log($"[Timberborn HD] Loaded 2K texture {textureName} from {texturePath}");
+            return texture;
         }
         catch (System.Exception exception)
         {
-            Debug.LogWarning($"[Timberborn HD] Could not load the soil albedo: {exception.Message}");
+            Debug.LogWarning($"[Timberborn HD] Could not load {relativePath}: {exception.Message}");
+            return null;
         }
     }
 
     private static void ApplyMaterialOverrides()
     {
-        if (_soilAlbedo == null)
-        {
-            return;
-        }
-
         var changedMaterials = 0;
         var materials = Resources.FindObjectsOfTypeAll<Material>();
 
         foreach (var material in materials)
         {
-            if (material == null
-                || material.shader == null
-                || material.shader.name != DirtShaderName
-                || !material.HasProperty(DirtTextureProperty))
+            if (material == null || material.shader == null)
             {
                 continue;
             }
 
-            var currentTexture = material.GetTexture(DirtTextureProperty);
-            if (currentTexture == _soilAlbedo || currentTexture == null || currentTexture.name != OriginalDirtTextureName)
+            if (material.shader.name == DirtShaderName
+                && material.HasProperty(DirtTextureProperty))
             {
-                continue;
+                var currentTexture = material.GetTexture(DirtTextureProperty);
+                if (_soilAlbedo != null
+                    && currentTexture != _soilAlbedo
+                    && currentTexture != null
+                    && currentTexture.name == OriginalDirtTextureName)
+                {
+                    material.SetTexture(DirtTextureProperty, _soilAlbedo);
+                    changedMaterials++;
+                }
+
+                if (_dryGroundAlbedo != null
+                    && currentTexture != _dryGroundAlbedo
+                    && currentTexture != null
+                    && currentTexture.name == OriginalGroundTextureName)
+                {
+                    material.SetTexture(DirtTextureProperty, _dryGroundAlbedo);
+                    changedMaterials++;
+                }
             }
 
-            material.SetTexture(DirtTextureProperty, _soilAlbedo);
-            changedMaterials++;
+            if (material.shader.name == TerrainShaderName
+                && material.HasProperty(TerrainBaseAlbedoProperty))
+            {
+                var currentBaseAlbedo = material.GetTexture(TerrainBaseAlbedoProperty);
+                if (_grassAlbedo != null
+                    && currentBaseAlbedo != _grassAlbedo
+                    && currentBaseAlbedo != null
+                    && currentBaseAlbedo.name == OriginalGrassTextureName)
+                {
+                    material.SetTexture(TerrainBaseAlbedoProperty, _grassAlbedo);
+
+                    var materialName = material.name.Replace(" (Instance)", string.Empty);
+                    if (_grassNormal != null
+                        && materialName == "Grass"
+                        && material.HasProperty(TerrainNormalProperty))
+                    {
+                        material.SetTexture(TerrainNormalProperty, _grassNormal);
+                    }
+
+                    changedMaterials++;
+                }
+            }
         }
 
-        Debug.Log($"[Timberborn HD] Applied the 2K soil albedo to {changedMaterials} DirtURP materials.");
+        Debug.Log($"[Timberborn HD] Applied HD terrain textures to {changedMaterials} materials.");
     }
 
     private static void WriteTextureInventory()

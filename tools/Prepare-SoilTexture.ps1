@@ -1,6 +1,7 @@
 param(
     [string]$InputPath = (Join-Path $PSScriptRoot '..\assets\source\soil-neutral-seamless-source.png'),
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\mod\TimberbornHD\Textures\Soil'),
+    [string]$BaseName = 'soil-neutral',
     [int]$Size = 2048
 )
 
@@ -17,23 +18,23 @@ using System.IO;
 
 public static class TimberbornHdTexturePrep
 {
-    public static void Run(string inputPath, string outputDirectory, int size)
+    public static void Run(string inputPath, string outputDirectory, string baseName, int size)
     {
         Directory.CreateDirectory(outputDirectory);
 
         using (var input = new Bitmap(inputPath))
         using (var albedo = CreatePeriodicTile(input, size))
         {
-            albedo.Save(Path.Combine(outputDirectory, "soil-neutral-albedo.png"), ImageFormat.Png);
+            albedo.Save(Path.Combine(outputDirectory, baseName + "-albedo.png"), ImageFormat.Png);
 
             using (var normal = CreateNormalMap(albedo, 3.2f))
             {
-                normal.Save(Path.Combine(outputDirectory, "soil-neutral-normal.png"), ImageFormat.Png);
+                normal.Save(Path.Combine(outputDirectory, baseName + "-normal.png"), ImageFormat.Png);
             }
 
             using (var roughness = CreateRoughnessMap(albedo))
             {
-                roughness.Save(Path.Combine(outputDirectory, "soil-neutral-roughness.png"), ImageFormat.Png);
+                roughness.Save(Path.Combine(outputDirectory, baseName + "-roughness.png"), ImageFormat.Png);
             }
         }
     }
@@ -178,7 +179,44 @@ public static class TimberbornHdTexturePrep
             output.UnlockBits(outputData);
         }
 
+        MatchOppositeEdges(output);
         return output;
+    }
+
+    private static void MatchOppositeEdges(Bitmap bitmap)
+    {
+        var rectangle = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var data = bitmap.LockBits(rectangle, ImageLockMode.ReadWrite, PixelFormat.Format24bppRgb);
+
+        try
+        {
+            unsafe
+            {
+                var pointer = (byte*)data.Scan0;
+
+                for (var y = 0; y < bitmap.Height; y++)
+                {
+                    var first = pointer + y * data.Stride;
+                    var last = first + (bitmap.Width - 1) * 3;
+                    last[0] = first[0];
+                    last[1] = first[1];
+                    last[2] = first[2];
+                }
+
+                for (var x = 0; x < bitmap.Width; x++)
+                {
+                    var first = pointer + x * 3;
+                    var last = pointer + (bitmap.Height - 1) * data.Stride + x * 3;
+                    last[0] = first[0];
+                    last[1] = first[1];
+                    last[2] = first[2];
+                }
+            }
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
     }
 
     private static Bitmap CreateRoughnessMap(Bitmap albedo)
@@ -239,6 +277,6 @@ Add-Type -TypeDefinition $source -CompilerParameters $compilerParameters
 
 $resolvedInput = (Resolve-Path -LiteralPath $InputPath).Path
 $resolvedOutput = [System.IO.Path]::GetFullPath($OutputDirectory)
-[TimberbornHdTexturePrep]::Run($resolvedInput, $resolvedOutput, $Size)
+[TimberbornHdTexturePrep]::Run($resolvedInput, $resolvedOutput, $BaseName, $Size)
 
 Write-Host "Prepared $Size x $Size soil textures in $resolvedOutput"

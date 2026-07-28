@@ -8,7 +8,8 @@ milestone improves texture sampling without replacing the game's art:
 - up to 16× anisotropic filtering;
 - automatic reapplication when Timberborn changes scenes.
 - an original seamless 2K soil material with albedo, normal, and roughness maps.
-- runtime replacement of the DirtURP `_MainTex` terrain binding.
+- original seamless 2K grass and dry-ground materials.
+- targeted runtime replacement of DirtURP and TerrainURP texture bindings.
 
 This is the foundation for later high-resolution PBR texture packs, material
 overrides, lighting controls, and selective model improvements.
@@ -42,10 +43,14 @@ To use a non-default installation:
 The packaged mod is written to `dist/TimberbornHD.zip`. The build also leaves
 an unpacked copy under `mod/TimberbornHD`.
 
-To regenerate the game-ready 2K soil maps from the original source:
+To regenerate any game-ready 2K texture set from an original source:
 
 ```powershell
 .\tools\Prepare-SoilTexture.ps1
+.\tools\Prepare-SoilTexture.ps1 `
+  -InputPath .\assets\source\grass-natural-source.png `
+  -OutputDirectory .\mod\TimberbornHD\Textures\Terrain `
+  -BaseName grass-natural
 ```
 
 ## Install
@@ -73,15 +78,16 @@ After entering a map, the mod writes deduplicated `TimberbornHD-textures.csv` an
 live textures, materials, shaders, and texture-property bindings so replacement
 materials can target exact game assets without unsafe guesses.
 
-Timberborn's DirtURP shader exposes its visible dirt surface through `_MainTex`
-but does not expose normal or roughness texture properties. Version 0.3.0
-therefore applies the included 2K albedo safely while retaining the normal and
-roughness maps for future shaders that support them.
+Timberborn's DirtURP shader exposes dirt and dry field surfaces through
+`_MainTex` but does not expose normal or roughness texture properties. The
+TerrainURP shader exposes grass through `_BaseAlbedoTex` and a `_Normalmap`;
+Timberborn HD replaces those bindings selectively while retaining unused PBR
+maps for future shaders that support them.
 
 Planned work:
 
-1. Validate the DirtURP replacement in multiple lighting and moisture conditions.
-2. Identify terrain shaders that support normal and packed mask maps.
+1. Validate grass and dry-ground scale in multiple lighting and moisture conditions.
+2. Export tree texture atlases locally so enhanced replacements preserve UV layouts.
 3. Add ambient-occlusion and packed mask maps where Timberborn's shaders support them.
 4. Add quality presets and a settings UI.
 5. Profile VRAM use before offering optional 4K variants.
