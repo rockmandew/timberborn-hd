@@ -11,7 +11,8 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 {
     private const int MaximumAnisotropicLevel = 16;
     private const float SceneLoadDelaySeconds = 1.0f;
-    private const string InventoryFileName = "TimberbornHD-textures.csv";
+    private const string TextureInventoryFileName = "TimberbornHD-textures.csv";
+    private const string MaterialInventoryFileName = "TimberbornHD-materials.csv";
 
     public static GraphicsEnhancer? Instance { get; private set; }
     private static string? _modPath;
@@ -55,6 +56,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         yield return new WaitForSecondsRealtime(SceneLoadDelaySeconds);
         ApplyTextureQuality();
         WriteTextureInventory();
+        WriteMaterialInventory();
     }
 
     private static void ApplyTextureQuality()
@@ -107,13 +109,68 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                 csv.Append(texture.anisoLevel).AppendLine();
             }
 
-            var inventoryPath = Path.Combine(_modPath, InventoryFileName);
+            var inventoryPath = Path.Combine(_modPath, TextureInventoryFileName);
             File.WriteAllText(inventoryPath, csv.ToString());
             Debug.Log($"[Timberborn HD] Wrote {textures.Length} texture records to {inventoryPath}");
         }
         catch (System.Exception exception)
         {
             Debug.LogWarning($"[Timberborn HD] Could not write the texture inventory: {exception.Message}");
+        }
+    }
+
+    private static void WriteMaterialInventory()
+    {
+        if (string.IsNullOrWhiteSpace(_modPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var materials = Resources.FindObjectsOfTypeAll<Material>()
+                .Where(material => material != null && !string.IsNullOrWhiteSpace(material.name))
+                .OrderBy(material => material.name)
+                .ThenBy(material => material.shader != null ? material.shader.name : string.Empty)
+                .ToArray();
+
+            var csv = new StringBuilder();
+            csv.AppendLine("Material,Shader,Property,Texture,Width,Height");
+            var bindingCount = 0;
+
+            foreach (var material in materials)
+            {
+                var shaderName = material.shader != null ? material.shader.name : string.Empty;
+                var propertyNames = material.GetTexturePropertyNames();
+
+                if (propertyNames.Length == 0)
+                {
+                    csv.Append(EscapeCsv(material.name)).Append(',');
+                    csv.Append(EscapeCsv(shaderName)).AppendLine(",,,,");
+                    continue;
+                }
+
+                foreach (var propertyName in propertyNames)
+                {
+                    var texture = material.GetTexture(propertyName);
+                    csv.Append(EscapeCsv(material.name)).Append(',');
+                    csv.Append(EscapeCsv(shaderName)).Append(',');
+                    csv.Append(EscapeCsv(propertyName)).Append(',');
+                    csv.Append(EscapeCsv(texture != null ? texture.name : string.Empty)).Append(',');
+                    csv.Append(texture != null ? texture.width : 0).Append(',');
+                    csv.Append(texture != null ? texture.height : 0).AppendLine();
+                    bindingCount++;
+                }
+            }
+
+            var inventoryPath = Path.Combine(_modPath, MaterialInventoryFileName);
+            File.WriteAllText(inventoryPath, csv.ToString());
+            Debug.Log(
+                $"[Timberborn HD] Wrote {materials.Length} materials and {bindingCount} texture bindings to {inventoryPath}");
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning($"[Timberborn HD] Could not write the material inventory: {exception.Message}");
         }
     }
 

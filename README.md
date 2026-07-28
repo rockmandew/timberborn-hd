@@ -67,9 +67,10 @@ Documents\Timberborn\Mods\TimberbornHD\TimberbornHD.dll
 The `mod/TimberbornHD/Textures` directory contains original replacement art.
 Do not commit assets extracted from Timberborn.
 
-After entering a map, the mod writes `TimberbornHD-textures.csv` into its
-installed mod directory. This inventories live texture names and dimensions so
-replacement materials can target exact game assets without unsafe guesses.
+After entering a map, the mod writes `TimberbornHD-textures.csv` and
+`TimberbornHD-materials.csv` into its installed mod directory. These inventory
+live textures, materials, shaders, and texture-property bindings so replacement
+materials can target exact game assets without unsafe guesses.
 
 Planned work:
 
