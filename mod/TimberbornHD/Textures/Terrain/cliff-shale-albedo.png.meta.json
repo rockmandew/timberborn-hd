@@ -1,0 +1,10 @@
+{
+  "isSprite": false,
+  "isNormalMap": false,
+  "linear": false,
+  "generateMipmap": true,
+  "filterMode": "Trilinear",
+  "wrapMode": "Repeat",
+  "textureFormat": "RGB24",
+  "anisoLevel": 16
+}

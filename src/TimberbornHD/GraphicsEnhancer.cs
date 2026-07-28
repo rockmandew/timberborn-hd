@@ -19,11 +19,17 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const string OriginalDirtTextureName = "Dirt";
     private const string SoilAlbedoRelativePath = "Textures/Soil/soil-neutral-albedo.png";
     private const string TerrainShaderName = "Shader Graphs/TerrainURP";
+    private const string SlopeShaderName = "Shader Graphs/SlopeURP";
     private const string TerrainBaseAlbedoProperty = "_BaseAlbedoTex";
     private const string TerrainNormalProperty = "_Normalmap";
+    private const string TerrainSplatAlbedoProperty = "_SplatAlbedoTex";
     private const string OriginalGrassTextureName = "Grass";
     private const string GrassAlbedoRelativePath = "Textures/Terrain/grass-natural-albedo.png";
     private const string GrassNormalRelativePath = "Textures/Terrain/grass-natural-normal.png";
+    private const string OriginalCliffDetailTextureName = "CliffDetail";
+    private const string OriginalCliffNormalTextureName = "Cliff_N";
+    private const string CliffAlbedoRelativePath = "Textures/Terrain/cliff-shale-albedo.png";
+    private const string CliffNormalRelativePath = "Textures/Terrain/cliff-shale-normal.png";
     private const string OriginalGroundTextureName = "Ground";
     private const string DryGroundAlbedoRelativePath = "Textures/Terrain/ground-dry-albedo.png";
     private const string VegetationShaderName = "Shader Graphs/VegetationURP";
@@ -80,6 +86,8 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static Texture2D? _soilAlbedo;
     private static Texture2D? _grassAlbedo;
     private static Texture2D? _grassNormal;
+    private static Texture2D? _cliffAlbedo;
+    private static Texture2D? _cliffNormal;
     private static Texture2D? _dryGroundAlbedo;
     private static readonly Dictionary<string, Texture2D> TreeTextureOverrides = new();
 
@@ -169,6 +177,14 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         _grassNormal ??= LoadTexture(
             GrassNormalRelativePath,
             "TimberbornHD_GrassNatural_Normal",
+            linear: true);
+        _cliffAlbedo ??= LoadTexture(
+            CliffAlbedoRelativePath,
+            "TimberbornHD_CliffShale_Albedo",
+            linear: false);
+        _cliffNormal ??= LoadTexture(
+            CliffNormalRelativePath,
+            "TimberbornHD_CliffShale_Normal",
             linear: true);
         _dryGroundAlbedo ??= LoadTexture(
             DryGroundAlbedoRelativePath,
@@ -264,6 +280,33 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                     changedMaterials++;
                 }
 
+            }
+
+            if (material.shader.name == TerrainShaderName || material.shader.name == SlopeShaderName)
+            {
+                if (_cliffAlbedo != null && material.HasProperty(TerrainSplatAlbedoProperty))
+                {
+                    var currentSplatAlbedo = material.GetTexture(TerrainSplatAlbedoProperty);
+                    if (currentSplatAlbedo != _cliffAlbedo
+                        && currentSplatAlbedo != null
+                        && currentSplatAlbedo.name == OriginalCliffDetailTextureName)
+                    {
+                        material.SetTexture(TerrainSplatAlbedoProperty, _cliffAlbedo);
+                        changedMaterials++;
+                    }
+                }
+
+                if (_cliffNormal != null && material.HasProperty(TerrainNormalProperty))
+                {
+                    var currentNormal = material.GetTexture(TerrainNormalProperty);
+                    if (currentNormal != _cliffNormal
+                        && currentNormal != null
+                        && currentNormal.name == OriginalCliffNormalTextureName)
+                    {
+                        material.SetTexture(TerrainNormalProperty, _cliffNormal);
+                        changedMaterials++;
+                    }
+                }
             }
 
             if (material.shader.name == VegetationShaderName)

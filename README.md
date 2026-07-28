@@ -10,6 +10,7 @@ milestone improves texture sampling without replacing the game's art:
 - an original seamless 2K soil material with albedo, normal, and roughness maps.
 - original seamless 2K grass and dry-ground materials, with grass tuned for
   fine detail and Timberborn's bright fertility tint.
+- an original seamless 2K shale cliff material with matching normal map.
 - targeted runtime replacement of DirtURP and TerrainURP texture bindings.
 
 This is the foundation for later high-resolution PBR texture packs, material
