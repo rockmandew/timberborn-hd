@@ -21,11 +21,31 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const string TerrainShaderName = "Shader Graphs/TerrainURP";
     private const string TerrainBaseAlbedoProperty = "_BaseAlbedoTex";
     private const string TerrainNormalProperty = "_Normalmap";
+    private const string TerrainSplatAlbedoProperty = "_SplatAlbedoTex";
     private const string OriginalGrassTextureName = "Grass";
+    private const string OriginalCliffDetailTextureName = "CliffDetail";
     private const string GrassAlbedoRelativePath = "Textures/Terrain/grass-natural-albedo.png";
     private const string GrassNormalRelativePath = "Textures/Terrain/grass-natural-normal.png";
     private const string OriginalGroundTextureName = "Ground";
     private const string DryGroundAlbedoRelativePath = "Textures/Terrain/ground-dry-albedo.png";
+    private const string TreeDumpDirectoryName = "TextureDumps/Trees";
+
+    private static readonly HashSet<string> TreeTextureNames = new()
+    {
+        "Birch_D",
+        "Birch_N",
+        "ChestnutTree_D",
+        "ChestnutTree_N",
+        "Chestnut_Detail",
+        "Maple_D",
+        "Maple_N",
+        "Maple_Detail",
+        "Oak_D",
+        "Oak_N",
+        "Pine_D",
+        "Pine_N",
+        "Pine_Detail"
+    };
 
     public static GraphicsEnhancer? Instance { get; private set; }
     private static string? _modPath;
@@ -77,6 +97,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         ApplyMaterialOverrides();
         WriteTextureInventory();
         WriteMaterialInventory();
+        WriteTreeTextureDumps();
     }
 
     private static void ApplyTextureQuality()
@@ -192,6 +213,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             if (material.shader.name == TerrainShaderName
                 && material.HasProperty(TerrainBaseAlbedoProperty))
             {
+                var materialName = material.name.Replace(" (Instance)", string.Empty);
                 var currentBaseAlbedo = material.GetTexture(TerrainBaseAlbedoProperty);
                 if (_grassAlbedo != null
                     && currentBaseAlbedo != _grassAlbedo
@@ -199,21 +221,108 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                     && currentBaseAlbedo.name == OriginalGrassTextureName)
                 {
                     material.SetTexture(TerrainBaseAlbedoProperty, _grassAlbedo);
-
-                    var materialName = material.name.Replace(" (Instance)", string.Empty);
-                    if (_grassNormal != null
-                        && materialName == "Grass"
-                        && material.HasProperty(TerrainNormalProperty))
-                    {
-                        material.SetTexture(TerrainNormalProperty, _grassNormal);
-                    }
-
                     changedMaterials++;
+                }
+
+                if (_grassNormal != null
+                    && materialName == "Grass"
+                    && material.HasProperty(TerrainNormalProperty)
+                    && material.GetTexture(TerrainNormalProperty) != _grassNormal)
+                {
+                    material.SetTexture(TerrainNormalProperty, _grassNormal);
+                    changedMaterials++;
+                }
+
+                if (_dryGroundAlbedo != null
+                    && materialName == "Grass"
+                    && material.HasProperty(TerrainSplatAlbedoProperty))
+                {
+                    var currentSplatAlbedo = material.GetTexture(TerrainSplatAlbedoProperty);
+                    if (currentSplatAlbedo != _dryGroundAlbedo
+                        && currentSplatAlbedo != null
+                        && currentSplatAlbedo.name == OriginalCliffDetailTextureName)
+                    {
+                        material.SetTexture(TerrainSplatAlbedoProperty, _dryGroundAlbedo);
+                        changedMaterials++;
+                    }
                 }
             }
         }
 
         Debug.Log($"[Timberborn HD] Applied HD terrain textures to {changedMaterials} materials.");
+    }
+
+    private static void WriteTreeTextureDumps()
+    {
+        if (string.IsNullOrWhiteSpace(_modPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var dumpDirectory = Path.Combine(_modPath, TreeDumpDirectoryName);
+            Directory.CreateDirectory(dumpDirectory);
+            var dumpedTextures = 0;
+            var textures = Resources.FindObjectsOfTypeAll<Texture2D>()
+                .Where(texture => texture != null && TreeTextureNames.Contains(texture.name))
+                .GroupBy(texture => texture.name)
+                .Select(group => group.OrderByDescending(texture => texture.width * texture.height).First());
+
+            foreach (var texture in textures)
+            {
+                var dumpPath = Path.Combine(dumpDirectory, $"{texture.name}.png");
+                if (File.Exists(dumpPath))
+                {
+                    continue;
+                }
+
+                WriteTextureAsPng(texture, dumpPath);
+                dumpedTextures++;
+            }
+
+            Debug.Log($"[Timberborn HD] Exported {dumpedTextures} tree reference textures to {dumpDirectory}");
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning($"[Timberborn HD] Could not export tree reference textures: {exception.Message}");
+        }
+    }
+
+    private static void WriteTextureAsPng(Texture2D source, string outputPath)
+    {
+        var previousActive = RenderTexture.active;
+        var renderTexture = RenderTexture.GetTemporary(
+            source.width,
+            source.height,
+            0,
+            RenderTextureFormat.ARGB32,
+            RenderTextureReadWrite.Default);
+        Texture2D? readableTexture = null;
+
+        try
+        {
+            Graphics.Blit(source, renderTexture);
+            RenderTexture.active = renderTexture;
+            readableTexture = new Texture2D(
+                source.width,
+                source.height,
+                TextureFormat.RGBA32,
+                false,
+                false);
+            readableTexture.ReadPixels(new Rect(0, 0, source.width, source.height), 0, 0, false);
+            readableTexture.Apply(false, false);
+            File.WriteAllBytes(outputPath, ImageConversion.EncodeToPNG(readableTexture));
+        }
+        finally
+        {
+            RenderTexture.active = previousActive;
+            RenderTexture.ReleaseTemporary(renderTexture);
+            if (readableTexture != null)
+            {
+                Object.Destroy(readableTexture);
+            }
+        }
     }
 
     private static void WriteTextureInventory()

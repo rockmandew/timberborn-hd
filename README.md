@@ -78,6 +78,11 @@ After entering a map, the mod writes deduplicated `TimberbornHD-textures.csv` an
 live textures, materials, shaders, and texture-property bindings so replacement
 materials can target exact game assets without unsafe guesses.
 
+Version 0.5 also exports the loaded tree atlases once to
+`TextureDumps/Trees` inside the installed mod directory. These local reference
+files preserve Timberborn's exact UV layout for the upcoming 2K tree pass and
+are excluded from this repository and release packages.
+
 Timberborn's DirtURP shader exposes dirt and dry field surfaces through
 `_MainTex` but does not expose normal or roughness texture properties. The
 TerrainURP shader exposes grass through `_BaseAlbedoTex` and a `_Normalmap`;

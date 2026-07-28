@@ -1,9 +1,9 @@
 {
   "Name": "Timberborn HD",
-  "Version": "0.4.1",
+  "Version": "0.5.0",
   "Id": "rockmandew.TimberbornHD",
   "MinimumGameVersion": "1.0.0.0",
-  "Description": "Improves world texture clarity with original seamless 2K dirt, parched hardpan, and grass materials.",
+  "Description": "Adds original 2K terrain materials, correct drought-layer replacement, and tree-atlas preparation.",
   "RequiredMods": [],
   "OptionalMods": []
 }
