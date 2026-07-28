@@ -83,9 +83,10 @@ Version 0.5 and later also export the loaded tree atlases once to
 files preserve Timberborn's exact UV layout for the upcoming 2K tree pass and
 are excluded from this repository and release packages.
 
-Version 0.6 pilots that tree pass on pine. It creates sharpened 2K albedo and
-renormalized 2K normal atlases in memory from the player's installed 1K pine
-textures, preserving alpha and UV coordinates without redistributing game art.
+Version 0.7 applies the tree pass to pine, oak, maple, birch, and chestnut. It
+creates sharpened 2K albedo and renormalized 2K normal atlases in memory from
+the player's installed 1K textures, preserving alpha and UV coordinates without
+redistributing game art. Conversions yield between atlases to reduce load stalls.
 
 Timberborn's DirtURP shader exposes dirt and dry field surfaces through
 `_MainTex` but does not expose normal or roughness texture properties. The

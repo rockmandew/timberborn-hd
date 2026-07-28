@@ -29,9 +29,21 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const string VegetationShaderName = "Shader Graphs/VegetationURP";
     private const string VegetationAlbedoProperty = "_MainTex";
     private const string VegetationNormalProperty = "_BumpMap";
-    private const string OriginalPineAlbedoTextureName = "Pine_D";
-    private const string OriginalPineNormalTextureName = "Pine_N";
     private const string TreeDumpDirectoryName = "TextureDumps/Trees";
+
+    private static readonly TreeTextureSpecification[] TreeTextureSpecifications =
+    {
+        new("Birch_D", "TimberbornHD_Birch_Albedo_2K", false, true, false),
+        new("Birch_N", "TimberbornHD_Birch_Normal_2K", true, false, true),
+        new("ChestnutTree_D", "TimberbornHD_Chestnut_Albedo_2K", false, true, false),
+        new("ChestnutTree_N", "TimberbornHD_Chestnut_Normal_2K", true, false, true),
+        new("Maple_D", "TimberbornHD_Maple_Albedo_2K", false, true, false),
+        new("Maple_N", "TimberbornHD_Maple_Normal_2K", true, false, true),
+        new("Oak_D", "TimberbornHD_Oak_Albedo_2K", false, true, false),
+        new("Oak_N", "TimberbornHD_Oak_Normal_2K", true, false, true),
+        new("Pine_D", "TimberbornHD_Pine_Albedo_2K", false, true, false),
+        new("Pine_N", "TimberbornHD_Pine_Normal_2K", true, false, true)
+    };
 
     private static readonly HashSet<string> TreeTextureNames = new()
     {
@@ -56,8 +68,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static Texture2D? _grassAlbedo;
     private static Texture2D? _grassNormal;
     private static Texture2D? _dryGroundAlbedo;
-    private static Texture2D? _pineAlbedo2K;
-    private static Texture2D? _pineNormal2K;
+    private static readonly Dictionary<string, Texture2D> TreeTextureOverrides = new();
 
     public static void Configure(string modPath)
     {
@@ -98,7 +109,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static IEnumerator ApplyAfterSceneLoad()
     {
         yield return new WaitForSecondsRealtime(SceneLoadDelaySeconds);
-        PreparePineTextureOverrides();
+        yield return PrepareTreeTextureOverrides();
         ApplyTextureQuality();
         ApplyMaterialOverrides();
         WriteTextureInventory();
@@ -243,80 +254,63 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
             if (material.shader.name == VegetationShaderName)
             {
-                if (_pineAlbedo2K != null && material.HasProperty(VegetationAlbedoProperty))
-                {
-                    var currentAlbedo = material.GetTexture(VegetationAlbedoProperty);
-                    if (currentAlbedo != _pineAlbedo2K
-                        && currentAlbedo != null
-                        && currentAlbedo.name == OriginalPineAlbedoTextureName)
-                    {
-                        material.SetTexture(VegetationAlbedoProperty, _pineAlbedo2K);
-                        changedMaterials++;
-                    }
-                }
-
-                if (_pineNormal2K != null && material.HasProperty(VegetationNormalProperty))
-                {
-                    var currentNormal = material.GetTexture(VegetationNormalProperty);
-                    if (currentNormal != _pineNormal2K
-                        && currentNormal != null
-                        && currentNormal.name == OriginalPineNormalTextureName)
-                    {
-                        material.SetTexture(VegetationNormalProperty, _pineNormal2K);
-                        changedMaterials++;
-                    }
-                }
+                changedMaterials += ApplyTreeTextureOverride(material, VegetationAlbedoProperty);
+                changedMaterials += ApplyTreeTextureOverride(material, VegetationNormalProperty);
             }
         }
 
         Debug.Log($"[Timberborn HD] Applied HD terrain textures to {changedMaterials} materials.");
     }
 
-    private static void PreparePineTextureOverrides()
+    private static int ApplyTreeTextureOverride(Material material, string propertyName)
     {
-        if (_pineAlbedo2K != null && _pineNormal2K != null)
+        if (!material.HasProperty(propertyName))
         {
-            return;
+            return 0;
         }
 
-        var textures = Resources.FindObjectsOfTypeAll<Texture2D>();
-
-        if (_pineAlbedo2K == null)
+        var currentTexture = material.GetTexture(propertyName);
+        if (currentTexture == null
+            || !TreeTextureOverrides.TryGetValue(currentTexture.name, out var replacement)
+            || currentTexture == replacement)
         {
-            var sourceAlbedo = textures
-                .Where(texture => texture != null && texture.name == OriginalPineAlbedoTextureName)
-                .OrderByDescending(texture => texture.width * texture.height)
-                .FirstOrDefault();
-            if (sourceAlbedo != null)
+            return 0;
+        }
+
+        material.SetTexture(propertyName, replacement);
+        return 1;
+    }
+
+    private static IEnumerator PrepareTreeTextureOverrides()
+    {
+        var texturesByName = Resources.FindObjectsOfTypeAll<Texture2D>()
+            .Where(texture => texture != null && !string.IsNullOrWhiteSpace(texture.name))
+            .GroupBy(texture => texture.name)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(texture => texture.width * texture.height).First());
+        var preparedTextures = 0;
+
+        foreach (var specification in TreeTextureSpecifications)
+        {
+            if (TreeTextureOverrides.ContainsKey(specification.SourceName)
+                || !texturesByName.TryGetValue(specification.SourceName, out var source))
             {
-                _pineAlbedo2K = CreateUpscaledTexture(
-                    sourceAlbedo,
-                    "TimberbornHD_Pine_Albedo_2K",
-                    linear: false,
-                    sharpenAlbedo: true,
-                    normalizeNormals: false);
+                continue;
             }
+
+            var replacement = CreateUpscaledTexture(
+                source,
+                specification.ReplacementName,
+                specification.Linear,
+                specification.SharpenAlbedo,
+                specification.NormalizeNormals);
+            TreeTextureOverrides.Add(specification.SourceName, replacement);
+            preparedTextures++;
+            yield return null;
         }
 
-        if (_pineNormal2K == null)
-        {
-            var sourceNormal = textures
-                .Where(texture => texture != null && texture.name == OriginalPineNormalTextureName)
-                .OrderByDescending(texture => texture.width * texture.height)
-                .FirstOrDefault();
-            if (sourceNormal != null)
-            {
-                _pineNormal2K = CreateUpscaledTexture(
-                    sourceNormal,
-                    "TimberbornHD_Pine_Normal_2K",
-                    linear: true,
-                    sharpenAlbedo: false,
-                    normalizeNormals: true);
-            }
-        }
-
-        Debug.Log(
-            $"[Timberborn HD] Prepared runtime 2K pine atlases: albedo={_pineAlbedo2K != null}, normal={_pineNormal2K != null}");
+        Debug.Log($"[Timberborn HD] Prepared {preparedTextures} runtime 2K tree atlases.");
     }
 
     private static Texture2D CreateUpscaledTexture(
@@ -443,6 +437,29 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                 (byte)Mathf.Clamp(Mathf.RoundToInt((z / length * 0.5f + 0.5f) * 255f), 0, 255),
                 pixel.a);
         }
+    }
+
+    private readonly struct TreeTextureSpecification
+    {
+        public TreeTextureSpecification(
+            string sourceName,
+            string replacementName,
+            bool linear,
+            bool sharpenAlbedo,
+            bool normalizeNormals)
+        {
+            SourceName = sourceName;
+            ReplacementName = replacementName;
+            Linear = linear;
+            SharpenAlbedo = sharpenAlbedo;
+            NormalizeNormals = normalizeNormals;
+        }
+
+        public string SourceName { get; }
+        public string ReplacementName { get; }
+        public bool Linear { get; }
+        public bool SharpenAlbedo { get; }
+        public bool NormalizeNormals { get; }
     }
 
     private static void WriteTreeTextureDumps()

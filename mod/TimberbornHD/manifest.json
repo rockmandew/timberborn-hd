@@ -1,9 +1,9 @@
 {
   "Name": "Timberborn HD",
-  "Version": "0.6.0",
+  "Version": "0.7.0",
   "Id": "rockmandew.TimberbornHD",
   "MinimumGameVersion": "1.0.0.0",
-  "Description": "Adds original 2K terrain materials and a UV-preserving runtime 2K pine texture upgrade.",
+  "Description": "Adds original 2K terrain materials and UV-preserving runtime 2K textures for all tree species.",
   "RequiredMods": [],
   "OptionalMods": []
 }
