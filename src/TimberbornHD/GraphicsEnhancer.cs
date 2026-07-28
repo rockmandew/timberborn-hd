@@ -21,13 +21,16 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const string TerrainShaderName = "Shader Graphs/TerrainURP";
     private const string TerrainBaseAlbedoProperty = "_BaseAlbedoTex";
     private const string TerrainNormalProperty = "_Normalmap";
-    private const string TerrainSplatAlbedoProperty = "_SplatAlbedoTex";
     private const string OriginalGrassTextureName = "Grass";
-    private const string OriginalCliffDetailTextureName = "CliffDetail";
     private const string GrassAlbedoRelativePath = "Textures/Terrain/grass-natural-albedo.png";
     private const string GrassNormalRelativePath = "Textures/Terrain/grass-natural-normal.png";
     private const string OriginalGroundTextureName = "Ground";
     private const string DryGroundAlbedoRelativePath = "Textures/Terrain/ground-dry-albedo.png";
+    private const string VegetationShaderName = "Shader Graphs/VegetationURP";
+    private const string VegetationAlbedoProperty = "_MainTex";
+    private const string VegetationNormalProperty = "_BumpMap";
+    private const string OriginalPineAlbedoTextureName = "Pine_D";
+    private const string OriginalPineNormalTextureName = "Pine_N";
     private const string TreeDumpDirectoryName = "TextureDumps/Trees";
 
     private static readonly HashSet<string> TreeTextureNames = new()
@@ -53,6 +56,8 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static Texture2D? _grassAlbedo;
     private static Texture2D? _grassNormal;
     private static Texture2D? _dryGroundAlbedo;
+    private static Texture2D? _pineAlbedo2K;
+    private static Texture2D? _pineNormal2K;
 
     public static void Configure(string modPath)
     {
@@ -93,6 +98,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static IEnumerator ApplyAfterSceneLoad()
     {
         yield return new WaitForSecondsRealtime(SceneLoadDelaySeconds);
+        PreparePineTextureOverrides();
         ApplyTextureQuality();
         ApplyMaterialOverrides();
         WriteTextureInventory();
@@ -233,16 +239,30 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                     changedMaterials++;
                 }
 
-                if (_dryGroundAlbedo != null
-                    && materialName == "Grass"
-                    && material.HasProperty(TerrainSplatAlbedoProperty))
+            }
+
+            if (material.shader.name == VegetationShaderName)
+            {
+                if (_pineAlbedo2K != null && material.HasProperty(VegetationAlbedoProperty))
                 {
-                    var currentSplatAlbedo = material.GetTexture(TerrainSplatAlbedoProperty);
-                    if (currentSplatAlbedo != _dryGroundAlbedo
-                        && currentSplatAlbedo != null
-                        && currentSplatAlbedo.name == OriginalCliffDetailTextureName)
+                    var currentAlbedo = material.GetTexture(VegetationAlbedoProperty);
+                    if (currentAlbedo != _pineAlbedo2K
+                        && currentAlbedo != null
+                        && currentAlbedo.name == OriginalPineAlbedoTextureName)
                     {
-                        material.SetTexture(TerrainSplatAlbedoProperty, _dryGroundAlbedo);
+                        material.SetTexture(VegetationAlbedoProperty, _pineAlbedo2K);
+                        changedMaterials++;
+                    }
+                }
+
+                if (_pineNormal2K != null && material.HasProperty(VegetationNormalProperty))
+                {
+                    var currentNormal = material.GetTexture(VegetationNormalProperty);
+                    if (currentNormal != _pineNormal2K
+                        && currentNormal != null
+                        && currentNormal.name == OriginalPineNormalTextureName)
+                    {
+                        material.SetTexture(VegetationNormalProperty, _pineNormal2K);
                         changedMaterials++;
                     }
                 }
@@ -250,6 +270,179 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
 
         Debug.Log($"[Timberborn HD] Applied HD terrain textures to {changedMaterials} materials.");
+    }
+
+    private static void PreparePineTextureOverrides()
+    {
+        if (_pineAlbedo2K != null && _pineNormal2K != null)
+        {
+            return;
+        }
+
+        var textures = Resources.FindObjectsOfTypeAll<Texture2D>();
+
+        if (_pineAlbedo2K == null)
+        {
+            var sourceAlbedo = textures
+                .Where(texture => texture != null && texture.name == OriginalPineAlbedoTextureName)
+                .OrderByDescending(texture => texture.width * texture.height)
+                .FirstOrDefault();
+            if (sourceAlbedo != null)
+            {
+                _pineAlbedo2K = CreateUpscaledTexture(
+                    sourceAlbedo,
+                    "TimberbornHD_Pine_Albedo_2K",
+                    linear: false,
+                    sharpenAlbedo: true,
+                    normalizeNormals: false);
+            }
+        }
+
+        if (_pineNormal2K == null)
+        {
+            var sourceNormal = textures
+                .Where(texture => texture != null && texture.name == OriginalPineNormalTextureName)
+                .OrderByDescending(texture => texture.width * texture.height)
+                .FirstOrDefault();
+            if (sourceNormal != null)
+            {
+                _pineNormal2K = CreateUpscaledTexture(
+                    sourceNormal,
+                    "TimberbornHD_Pine_Normal_2K",
+                    linear: true,
+                    sharpenAlbedo: false,
+                    normalizeNormals: true);
+            }
+        }
+
+        Debug.Log(
+            $"[Timberborn HD] Prepared runtime 2K pine atlases: albedo={_pineAlbedo2K != null}, normal={_pineNormal2K != null}");
+    }
+
+    private static Texture2D CreateUpscaledTexture(
+        Texture2D source,
+        string textureName,
+        bool linear,
+        bool sharpenAlbedo,
+        bool normalizeNormals)
+    {
+        const int targetSize = 2048;
+        var previousActive = RenderTexture.active;
+        var renderTexture = RenderTexture.GetTemporary(
+            targetSize,
+            targetSize,
+            0,
+            RenderTextureFormat.ARGB32,
+            linear ? RenderTextureReadWrite.Linear : RenderTextureReadWrite.sRGB);
+        Texture2D? result = null;
+
+        try
+        {
+            Graphics.Blit(source, renderTexture);
+            RenderTexture.active = renderTexture;
+            result = new Texture2D(targetSize, targetSize, TextureFormat.RGBA32, true, linear)
+            {
+                name = textureName,
+                wrapMode = source.wrapMode,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = MaximumAnisotropicLevel
+            };
+            result.ReadPixels(new Rect(0, 0, targetSize, targetSize), 0, 0, false);
+
+            var pixels = result.GetPixels32();
+            if (sharpenAlbedo)
+            {
+                SharpenColorPixels(pixels, targetSize, targetSize);
+            }
+
+            if (normalizeNormals)
+            {
+                NormalizeNormalPixels(pixels);
+            }
+
+            result.SetPixels32(pixels);
+            result.Apply(true, false);
+            return result;
+        }
+        catch
+        {
+            if (result != null)
+            {
+                Object.Destroy(result);
+            }
+
+            throw;
+        }
+        finally
+        {
+            RenderTexture.active = previousActive;
+            RenderTexture.ReleaseTemporary(renderTexture);
+        }
+    }
+
+    private static void SharpenColorPixels(Color32[] pixels, int width, int height)
+    {
+        const float amount = 0.28f;
+        var source = (Color32[])pixels.Clone();
+
+        for (var y = 1; y < height - 1; y++)
+        {
+            var row = y * width;
+            for (var x = 1; x < width - 1; x++)
+            {
+                var index = row + x;
+                var center = source[index];
+                if (center.a == 0)
+                {
+                    continue;
+                }
+
+                var left = source[index - 1];
+                var right = source[index + 1];
+                var down = source[index - width];
+                var up = source[index + width];
+                pixels[index] = new Color32(
+                    SharpenChannel(center.r, left.r, right.r, down.r, up.r, amount),
+                    SharpenChannel(center.g, left.g, right.g, down.g, up.g, amount),
+                    SharpenChannel(center.b, left.b, right.b, down.b, up.b, amount),
+                    center.a);
+            }
+        }
+    }
+
+    private static byte SharpenChannel(
+        byte center,
+        byte left,
+        byte right,
+        byte down,
+        byte up,
+        float amount)
+    {
+        var neighborAverage = (left + right + down + up) * 0.25f;
+        return (byte)Mathf.Clamp(Mathf.RoundToInt(center + (center - neighborAverage) * amount), 0, 255);
+    }
+
+    private static void NormalizeNormalPixels(Color32[] pixels)
+    {
+        for (var index = 0; index < pixels.Length; index++)
+        {
+            var pixel = pixels[index];
+            var x = pixel.r / 127.5f - 1f;
+            var y = pixel.g / 127.5f - 1f;
+            var z = pixel.b / 127.5f - 1f;
+            var length = Mathf.Sqrt(x * x + y * y + z * z);
+            if (length < 0.0001f)
+            {
+                pixels[index] = new Color32(128, 128, 255, pixel.a);
+                continue;
+            }
+
+            pixels[index] = new Color32(
+                (byte)Mathf.Clamp(Mathf.RoundToInt((x / length * 0.5f + 0.5f) * 255f), 0, 255),
+                (byte)Mathf.Clamp(Mathf.RoundToInt((y / length * 0.5f + 0.5f) * 255f), 0, 255),
+                (byte)Mathf.Clamp(Mathf.RoundToInt((z / length * 0.5f + 0.5f) * 255f), 0, 255),
+                pixel.a);
+        }
     }
 
     private static void WriteTreeTextureDumps()

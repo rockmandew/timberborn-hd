@@ -1,9 +1,9 @@
 {
   "Name": "Timberborn HD",
-  "Version": "0.5.0",
+  "Version": "0.6.0",
   "Id": "rockmandew.TimberbornHD",
   "MinimumGameVersion": "1.0.0.0",
-  "Description": "Adds original 2K terrain materials, correct drought-layer replacement, and tree-atlas preparation.",
+  "Description": "Adds original 2K terrain materials and a UV-preserving runtime 2K pine texture upgrade.",
   "RequiredMods": [],
   "OptionalMods": []
 }
