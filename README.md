@@ -8,6 +8,7 @@ milestone improves texture sampling without replacing the game's art:
 - up to 16× anisotropic filtering;
 - automatic reapplication when Timberborn changes scenes.
 - an original seamless 2K soil material with albedo, normal, and roughness maps.
+- runtime replacement of the DirtURP `_MainTex` terrain binding.
 
 This is the foundation for later high-resolution PBR texture packs, material
 overrides, lighting controls, and selective model improvements.
@@ -67,16 +68,21 @@ Documents\Timberborn\Mods\TimberbornHD\TimberbornHD.dll
 The `mod/TimberbornHD/Textures` directory contains original replacement art.
 Do not commit assets extracted from Timberborn.
 
-After entering a map, the mod writes `TimberbornHD-textures.csv` and
+After entering a map, the mod writes deduplicated `TimberbornHD-textures.csv` and
 `TimberbornHD-materials.csv` into its installed mod directory. These inventory
 live textures, materials, shaders, and texture-property bindings so replacement
 materials can target exact game assets without unsafe guesses.
 
+Timberborn's DirtURP shader exposes its visible dirt surface through `_MainTex`
+but does not expose normal or roughness texture properties. Version 0.3.0
+therefore applies the included 2K albedo safely while retaining the normal and
+roughness maps for future shaders that support them.
+
 Planned work:
 
-1. Run the in-game texture inventory and identify the terrain targets.
-2. Bind the included 2K soil material to the correct terrain surface.
-3. Add ambient-occlusion and packed mask maps where Timberborn's shader supports them.
+1. Validate the DirtURP replacement in multiple lighting and moisture conditions.
+2. Identify terrain shaders that support normal and packed mask maps.
+3. Add ambient-occlusion and packed mask maps where Timberborn's shaders support them.
 4. Add quality presets and a settings UI.
 5. Profile VRAM use before offering optional 4K variants.
 

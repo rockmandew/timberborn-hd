@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -13,9 +14,14 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const float SceneLoadDelaySeconds = 1.0f;
     private const string TextureInventoryFileName = "TimberbornHD-textures.csv";
     private const string MaterialInventoryFileName = "TimberbornHD-materials.csv";
+    private const string DirtShaderName = "Shader Graphs/DirtURP";
+    private const string DirtTextureProperty = "_MainTex";
+    private const string OriginalDirtTextureName = "Dirt";
+    private const string SoilAlbedoRelativePath = "Textures/Soil/soil-neutral-albedo.png";
 
     public static GraphicsEnhancer? Instance { get; private set; }
     private static string? _modPath;
+    private static Texture2D? _soilAlbedo;
 
     public static void Configure(string modPath)
     {
@@ -33,8 +39,10 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         Instance = this;
         QualitySettings.anisotropicFiltering = AnisotropicFiltering.ForceEnable;
         QualitySettings.globalTextureMipmapLimit = 0;
+        LoadReplacementTextures();
         SceneManager.sceneLoaded += OnSceneLoaded;
         ApplyTextureQuality();
+        ApplyMaterialOverrides();
     }
 
     private void OnDestroy()
@@ -55,6 +63,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     {
         yield return new WaitForSecondsRealtime(SceneLoadDelaySeconds);
         ApplyTextureQuality();
+        ApplyMaterialOverrides();
         WriteTextureInventory();
         WriteMaterialInventory();
     }
@@ -77,6 +86,73 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
 
         Debug.Log($"[Timberborn HD] Enhanced {changedTextures} mipmapped world textures.");
+    }
+
+    private static void LoadReplacementTextures()
+    {
+        if (string.IsNullOrWhiteSpace(_modPath) || _soilAlbedo != null)
+        {
+            return;
+        }
+
+        try
+        {
+            var texturePath = Path.Combine(_modPath, SoilAlbedoRelativePath);
+            var textureBytes = File.ReadAllBytes(texturePath);
+            var texture = new Texture2D(2, 2, TextureFormat.RGB24, true, false)
+            {
+                name = "TimberbornHD_SoilNeutral_Albedo",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = MaximumAnisotropicLevel
+            };
+
+            if (!ImageConversion.LoadImage(texture, textureBytes, false))
+            {
+                Object.Destroy(texture);
+                throw new InvalidDataException($"Unity could not decode {texturePath}.");
+            }
+
+            _soilAlbedo = texture;
+            Debug.Log($"[Timberborn HD] Loaded 2K soil albedo from {texturePath}");
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning($"[Timberborn HD] Could not load the soil albedo: {exception.Message}");
+        }
+    }
+
+    private static void ApplyMaterialOverrides()
+    {
+        if (_soilAlbedo == null)
+        {
+            return;
+        }
+
+        var changedMaterials = 0;
+        var materials = Resources.FindObjectsOfTypeAll<Material>();
+
+        foreach (var material in materials)
+        {
+            if (material == null
+                || material.shader == null
+                || material.shader.name != DirtShaderName
+                || !material.HasProperty(DirtTextureProperty))
+            {
+                continue;
+            }
+
+            var currentTexture = material.GetTexture(DirtTextureProperty);
+            if (currentTexture == _soilAlbedo || currentTexture == null || currentTexture.name != OriginalDirtTextureName)
+            {
+                continue;
+            }
+
+            material.SetTexture(DirtTextureProperty, _soilAlbedo);
+            changedMaterials++;
+        }
+
+        Debug.Log($"[Timberborn HD] Applied the 2K soil albedo to {changedMaterials} DirtURP materials.");
     }
 
     private static void WriteTextureInventory()
@@ -136,16 +212,24 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
             var csv = new StringBuilder();
             csv.AppendLine("Material,Shader,Property,Texture,Width,Height");
+            var uniqueBindings = new HashSet<string>();
             var bindingCount = 0;
 
             foreach (var material in materials)
             {
                 var shaderName = material.shader != null ? material.shader.name : string.Empty;
+                var materialName = material.name.Replace(" (Instance)", string.Empty);
                 var propertyNames = material.GetTexturePropertyNames();
 
                 if (propertyNames.Length == 0)
                 {
-                    csv.Append(EscapeCsv(material.name)).Append(',');
+                    var emptyKey = $"{materialName}\u001f{shaderName}";
+                    if (!uniqueBindings.Add(emptyKey))
+                    {
+                        continue;
+                    }
+
+                    csv.Append(EscapeCsv(materialName)).Append(',');
                     csv.Append(EscapeCsv(shaderName)).AppendLine(",,,,");
                     continue;
                 }
@@ -153,10 +237,17 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                 foreach (var propertyName in propertyNames)
                 {
                     var texture = material.GetTexture(propertyName);
-                    csv.Append(EscapeCsv(material.name)).Append(',');
+                    var textureName = texture != null ? texture.name : string.Empty;
+                    var bindingKey = $"{materialName}\u001f{shaderName}\u001f{propertyName}\u001f{textureName}";
+                    if (!uniqueBindings.Add(bindingKey))
+                    {
+                        continue;
+                    }
+
+                    csv.Append(EscapeCsv(materialName)).Append(',');
                     csv.Append(EscapeCsv(shaderName)).Append(',');
                     csv.Append(EscapeCsv(propertyName)).Append(',');
-                    csv.Append(EscapeCsv(texture != null ? texture.name : string.Empty)).Append(',');
+                    csv.Append(EscapeCsv(textureName)).Append(',');
                     csv.Append(texture != null ? texture.width : 0).Append(',');
                     csv.Append(texture != null ? texture.height : 0).AppendLine();
                     bindingCount++;
@@ -166,7 +257,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             var inventoryPath = Path.Combine(_modPath, MaterialInventoryFileName);
             File.WriteAllText(inventoryPath, csv.ToString());
             Debug.Log(
-                $"[Timberborn HD] Wrote {materials.Length} materials and {bindingCount} texture bindings to {inventoryPath}");
+                $"[Timberborn HD] Wrote {bindingCount} unique material texture bindings to {inventoryPath}");
         }
         catch (System.Exception exception)
         {
