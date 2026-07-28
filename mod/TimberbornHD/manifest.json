@@ -1,10 +1,9 @@
 {
   "Name": "Timberborn HD",
-  "Version": "0.1.0",
+  "Version": "0.2.0",
   "Id": "rockmandew.TimberbornHD",
   "MinimumGameVersion": "1.0.0.0",
-  "Description": "Improves world texture clarity and provides a foundation for an original high-resolution graphics overhaul.",
+  "Description": "Improves world texture clarity and includes the first original 2K soil material for a high-resolution graphics overhaul.",
   "RequiredMods": [],
   "OptionalMods": []
 }
-

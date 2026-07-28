@@ -7,6 +7,7 @@ milestone improves texture sampling without replacing the game's art:
 - trilinear filtering for mipmapped world textures;
 - up to 16× anisotropic filtering;
 - automatic reapplication when Timberborn changes scenes.
+- an original seamless 2K soil material with albedo, normal, and roughness maps.
 
 This is the foundation for later high-resolution PBR texture packs, material
 overrides, lighting controls, and selective model improvements.
@@ -40,6 +41,12 @@ To use a non-default installation:
 The packaged mod is written to `dist/TimberbornHD.zip`. The build also leaves
 an unpacked copy under `mod/TimberbornHD`.
 
+To regenerate the game-ready 2K soil maps from the original source:
+
+```powershell
+.\tools\Prepare-SoilTexture.ps1
+```
+
 ## Install
 
 Extract `TimberbornHD.zip` into:
@@ -57,14 +64,18 @@ Documents\Timberborn\Mods\TimberbornHD\TimberbornHD.dll
 
 ## Texture replacement roadmap
 
-The `mod/TimberbornHD/Textures` directory is reserved for original replacement
-art. Do not commit assets extracted from Timberborn.
+The `mod/TimberbornHD/Textures` directory contains original replacement art.
+Do not commit assets extracted from Timberborn.
+
+After entering a map, the mod writes `TimberbornHD-textures.csv` into its
+installed mod directory. This inventories live texture names and dimensions so
+replacement materials can target exact game assets without unsafe guesses.
 
 Planned work:
 
-1. Inventory terrain and environment texture names and paths.
-2. Replace one tiling terrain surface with an original 2K PBR material.
-3. Add normal, roughness, and ambient-occlusion maps.
+1. Run the in-game texture inventory and identify the terrain targets.
+2. Bind the included 2K soil material to the correct terrain surface.
+3. Add ambient-occlusion and packed mask maps where Timberborn's shader supports them.
 4. Add quality presets and a settings UI.
 5. Profile VRAM use before offering optional 4K variants.
 
@@ -72,4 +83,3 @@ Planned work:
 
 Timberborn and its original assets are owned by Mechanistry. This repository
 contains original mod code only and is not affiliated with Mechanistry.
-

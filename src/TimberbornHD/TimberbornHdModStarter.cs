@@ -12,6 +12,7 @@ public sealed class TimberbornHdModStarter : IModStarter
             return;
         }
 
+        GraphicsEnhancer.Configure(modEnvironment.ModPath);
         var host = new GameObject("TimberbornHD");
         Object.DontDestroyOnLoad(host);
         host.AddComponent<GraphicsEnhancer>();
@@ -19,4 +20,3 @@ public sealed class TimberbornHdModStarter : IModStarter
         Debug.Log($"[Timberborn HD] Loaded from {modEnvironment.ModPath}");
     }
 }
-
