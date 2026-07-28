@@ -8,7 +8,8 @@ milestone improves texture sampling without replacing the game's art:
 - up to 16× anisotropic filtering;
 - automatic reapplication when Timberborn changes scenes.
 - an original seamless 2K soil material with albedo, normal, and roughness maps.
-- original seamless 2K grass and dry-ground materials.
+- original seamless 2K grass and dry-ground materials, with grass tuned for
+  fine detail and Timberborn's bright fertility tint.
 - targeted runtime replacement of DirtURP and TerrainURP texture bindings.
 
 This is the foundation for later high-resolution PBR texture packs, material
