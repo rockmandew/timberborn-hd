@@ -31,6 +31,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const string CliffAlbedoRelativePath = "Textures/Terrain/cliff-shale-albedo.png";
     private const string CliffNormalRelativePath = "Textures/Terrain/cliff-shale-normal.png";
     private const string OriginalGroundTextureName = "Ground";
+    private const string OriginalDryFieldTextureName = "DryField";
     private const string DryGroundAlbedoRelativePath = "Textures/Terrain/ground-dry-albedo.png";
     private const string VegetationShaderName = "Shader Graphs/VegetationURP";
     private const string VegetationAlbedoProperty = "_MainTex";
@@ -90,6 +91,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static Texture2D? _cliffNormal;
     private static Texture2D? _dryGroundAlbedo;
     private static readonly Dictionary<string, Texture2D> TreeTextureOverrides = new();
+    private static readonly HashSet<int> OverriddenDryFieldTextureIds = new();
 
     public static void Configure(string modPath)
     {
@@ -224,6 +226,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
     private static void ApplyMaterialOverrides()
     {
+        ApplyDryFieldTextureOverride();
         var changedMaterials = 0;
         var materials = Resources.FindObjectsOfTypeAll<Material>();
 
@@ -317,6 +320,52 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
 
         Debug.Log($"[Timberborn HD] Applied HD terrain textures to {changedMaterials} materials.");
+    }
+
+    private static void ApplyDryFieldTextureOverride()
+    {
+        if (string.IsNullOrWhiteSpace(_modPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var candidates = Resources.FindObjectsOfTypeAll<Texture2D>()
+                .Where(texture => texture != null
+                                  && texture.name == OriginalDryFieldTextureName
+                                  && !OverriddenDryFieldTextureIds.Contains(texture.GetInstanceID()))
+                .ToArray();
+            if (candidates.Length == 0)
+            {
+                return;
+            }
+
+            var texturePath = Path.Combine(_modPath, DryGroundAlbedoRelativePath);
+            var textureBytes = File.ReadAllBytes(texturePath);
+            var changedTextures = 0;
+
+            foreach (var texture in candidates)
+            {
+                if (!ImageConversion.LoadImage(texture, textureBytes, false))
+                {
+                    continue;
+                }
+
+                texture.name = OriginalDryFieldTextureName;
+                texture.wrapMode = TextureWrapMode.Repeat;
+                texture.filterMode = FilterMode.Trilinear;
+                texture.anisoLevel = MaximumAnisotropicLevel;
+                OverriddenDryFieldTextureIds.Add(texture.GetInstanceID());
+                changedTextures++;
+            }
+
+            Debug.Log($"[Timberborn HD] Replaced {changedTextures} DryField texture instances in place.");
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning($"[Timberborn HD] Could not replace DryField in place: {exception.Message}");
+        }
     }
 
     private static int ApplyTreeTextureOverride(Material material, string propertyName)

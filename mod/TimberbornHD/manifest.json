@@ -1,9 +1,9 @@
 {
   "Name": "Timberborn HD",
-  "Version": "0.9.0",
+  "Version": "0.10.0",
   "Id": "rockmandew.TimberbornHD",
   "MinimumGameVersion": "1.0.0.0",
-  "Description": "Adds refined 2K grass, shale cliffs, soil, and UV-preserving runtime tree textures.",
+  "Description": "Adds refined 2K grass, varied shale cliffs, parched dry terrain, and runtime tree textures.",
   "RequiredMods": [],
   "OptionalMods": []
 }
