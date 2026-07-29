@@ -92,6 +92,8 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static Texture2D? _dryGroundAlbedo;
     private static readonly Dictionary<string, Texture2D> TreeTextureOverrides = new();
     private static readonly HashSet<int> OverriddenDryFieldTextureIds = new();
+    private static int _dryFieldShaderPropertyId = -1;
+    private static bool _dryFieldShaderPropertyLookupAttempted;
 
     public static void Configure(string modPath)
     {
@@ -122,6 +124,11 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             SceneManager.sceneLoaded -= OnSceneLoaded;
             Instance = null;
         }
+    }
+
+    private void LateUpdate()
+    {
+        ApplyDryFieldGlobalOverride();
     }
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode loadSceneMode)
@@ -365,6 +372,53 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         catch (System.Exception exception)
         {
             Debug.LogWarning($"[Timberborn HD] Could not replace DryField in place: {exception.Message}");
+        }
+    }
+
+    private static void ApplyDryFieldGlobalOverride()
+    {
+        if (_dryGroundAlbedo == null)
+        {
+            return;
+        }
+
+        if (_dryFieldShaderPropertyId < 0 && !_dryFieldShaderPropertyLookupAttempted)
+        {
+            _dryFieldShaderPropertyLookupAttempted = true;
+
+            try
+            {
+                var terrainAssembly = System.AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(assembly => assembly.GetName().Name == "Timberborn.TerrainSystemRendering");
+                var terrainMaterialMapType = terrainAssembly?.GetType(
+                    "Timberborn.TerrainSystemRendering.TerrainMaterialMap");
+                var propertyField = terrainMaterialMapType?.GetField(
+                    "DryFieldTextureProperty",
+                    System.Reflection.BindingFlags.Static
+                    | System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.NonPublic);
+
+                if (propertyField?.GetValue(null) is int propertyId)
+                {
+                    _dryFieldShaderPropertyId = propertyId;
+                    Debug.Log(
+                        $"[Timberborn HD] Resolved global DryField shader property ID {propertyId}.");
+                }
+                else
+                {
+                    Debug.LogWarning("[Timberborn HD] Could not resolve the global DryField shader property.");
+                }
+            }
+            catch (System.Exception exception)
+            {
+                Debug.LogWarning(
+                    $"[Timberborn HD] Could not inspect the global DryField shader property: {exception.Message}");
+            }
+        }
+
+        if (_dryFieldShaderPropertyId >= 0)
+        {
+            Shader.SetGlobalTexture(_dryFieldShaderPropertyId, _dryGroundAlbedo);
         }
     }
 

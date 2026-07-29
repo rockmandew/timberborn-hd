@@ -12,7 +12,8 @@ milestone improves texture sampling without replacing the game's art:
   fine detail and Timberborn's bright fertility tint.
 - an original seamless 2K varied shale cliff material with matching normal map.
 - in-place replacement of Timberborn's hidden `DryField` texture with finer
-  parched hardpan while preserving badwater contamination.
+  parched hardpan plus a global shader override through `TerrainMaterialMap`,
+  while preserving badwater contamination.
 - targeted runtime replacement of DirtURP and TerrainURP texture bindings.
 
 This is the foundation for later high-resolution PBR texture packs, material
