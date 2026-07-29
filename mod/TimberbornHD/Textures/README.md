@@ -1,8 +1,7 @@
 # Replacement textures
 
-Place original replacement textures here while developing the high-resolution
-material pack. Preserve Timberborn resource-relative paths when using direct
-image overrides.
+Only textures consumed by the production mod are packaged here. Development
+maps and metadata live under `assets/source-textures` so releases stay compact.
 
 Each texture can have a sibling metadata file such as:
 

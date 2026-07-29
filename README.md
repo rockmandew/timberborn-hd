@@ -31,10 +31,24 @@ milestone improves texture sampling without replacing the game's art:
   enhancement for the original 256px storage-box material.
 - runtime compression for generated atlases, keeping the high-resolution pass
   practical without expanding every AO or metallic map.
+- production runtime that shares one resource snapshot per scene, skips
+  previously processed texture/material instances, and binds terrain only at
+  the render boundary.
+- release packaging that excludes unused source maps and development metadata.
 - targeted runtime replacement of DirtURP and TerrainURP texture bindings.
 
 This is the foundation for later high-resolution PBR texture packs, material
 overrides, lighting controls, and selective model improvements.
+
+Development inventories and texture dumps are disabled by default. To enable
+them for a diagnostic run, create an empty `enable-diagnostics.txt` file beside
+the installed mod's `manifest.json`, then restart Timberborn.
+
+## Optimization roadmap
+
+- Cache locally generated, compressed runtime atlases using source hashes.
+- Package original Timberborn HD terrain assets in a Unity AssetBundle for
+  GPU-ready loading while keeping game-derived textures local to each player.
 
 ## Compatibility
 

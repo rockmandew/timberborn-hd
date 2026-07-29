@@ -16,6 +16,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const string TextureInventoryFileName = "TimberbornHD-textures.csv";
     private const string MaterialInventoryFileName = "TimberbornHD-materials.csv";
     private const string EnhancementReportFileName = "TimberbornHD-enhancements.csv";
+    private const string DiagnosticsOptInFileName = "enable-diagnostics.txt";
     private const string DryGroundDiagnosticsFileName = "TimberbornHD-dryfield-global.txt";
     private const string DirtShaderName = "Shader Graphs/DirtURP";
     private const string DirtTextureProperty = "_MainTex";
@@ -152,16 +153,21 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static readonly Dictionary<string, Texture2D> CropTextureOverrides = new();
     private static readonly Dictionary<string, Texture2D> SurfaceTextureOverrides = new();
     private static readonly List<string> RuntimeEnhancementRecords = new();
+    private static readonly HashSet<int> QualityEnhancedTextureIds = new();
+    private static readonly HashSet<int> ProcessedMaterialIds = new();
     private static readonly HashSet<int> OverriddenDryFieldTextureIds = new();
     private static int _desertShaderPropertyId = -1;
     private static int _wetFieldShaderPropertyId = -1;
     private static int _dryFieldShaderPropertyId = -1;
     private static bool _terrainShaderPropertyLookupAttempted;
     private static bool _dryGroundRenderDiagnosticWritten;
+    private static bool _developmentDiagnosticsEnabled;
 
     public static void Configure(string modPath)
     {
         _modPath = modPath;
+        _developmentDiagnosticsEnabled = File.Exists(
+            Path.Combine(modPath, DiagnosticsOptInFileName));
     }
 
     private void Awake()
@@ -178,8 +184,10 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         LoadReplacementTextures();
         SceneManager.sceneLoaded += OnSceneLoaded;
         RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
-        ApplyTextureQuality();
-        ApplyMaterialOverrides();
+        var textures = Resources.FindObjectsOfTypeAll<Texture2D>();
+        var materials = Resources.FindObjectsOfTypeAll<Material>();
+        ApplyTextureQuality(textures);
+        ApplyMaterialOverrides(textures, materials, trackProcessedMaterials: false);
     }
 
     private void OnDestroy()
@@ -192,14 +200,11 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
     }
 
-    private void LateUpdate()
-    {
-        ApplyDryGroundGlobalOverrides();
-    }
-
     private static void OnBeginCameraRendering(ScriptableRenderContext context, Camera camera)
     {
-        ApplyDryGroundGlobalOverrides(writeDiagnostics: true, cameraName: camera.name);
+        ApplyDryGroundGlobalOverrides(
+            writeDiagnostics: _developmentDiagnosticsEnabled,
+            cameraName: camera.name);
     }
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode loadSceneMode)
@@ -210,32 +215,41 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static IEnumerator ApplyAfterSceneLoad()
     {
         yield return new WaitForSecondsRealtime(SceneLoadDelaySeconds);
-        yield return PrepareTreeTextureOverrides();
-        yield return PrepareCropTextureOverrides();
-        yield return PrepareSurfaceTextureOverrides();
-        ApplyTextureQuality();
-        ApplyMaterialOverrides();
-        WriteTextureInventory();
-        WriteMaterialInventory();
-        WriteEnhancementReport();
-        WriteTreeTextureDumps();
-        WriteTerrainTextureDumps();
+        var textures = Resources.FindObjectsOfTypeAll<Texture2D>();
+        var materials = Resources.FindObjectsOfTypeAll<Material>();
+        yield return PrepareTreeTextureOverrides(textures);
+        yield return PrepareCropTextureOverrides(materials);
+        yield return PrepareSurfaceTextureOverrides(materials);
+        ApplyTextureQuality(textures);
+        ApplyMaterialOverrides(textures, materials, trackProcessedMaterials: true);
+
+        if (_developmentDiagnosticsEnabled)
+        {
+            WriteTextureInventory(textures);
+            WriteMaterialInventory(materials);
+            WriteEnhancementReport();
+            WriteTreeTextureDumps(textures);
+            WriteTerrainTextureDumps(textures);
+        }
     }
 
-    private static void ApplyTextureQuality()
+    private static void ApplyTextureQuality(Texture2D[] textures)
     {
         var changedTextures = 0;
-        var textures = Resources.FindObjectsOfTypeAll<Texture2D>();
 
         foreach (var texture in textures)
         {
-            if (texture == null || texture.mipmapCount <= 1 || texture.wrapMode == TextureWrapMode.Clamp)
+            if (texture == null
+                || QualityEnhancedTextureIds.Contains(texture.GetInstanceID())
+                || texture.mipmapCount <= 1
+                || texture.wrapMode == TextureWrapMode.Clamp)
             {
                 continue;
             }
 
             texture.filterMode = FilterMode.Trilinear;
             texture.anisoLevel = MaximumAnisotropicLevel;
+            QualityEnhancedTextureIds.Add(texture.GetInstanceID());
             changedTextures++;
         }
 
@@ -305,15 +319,20 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
     }
 
-    private static void ApplyMaterialOverrides()
+    private static void ApplyMaterialOverrides(
+        Texture2D[] textures,
+        Material[] materials,
+        bool trackProcessedMaterials)
     {
-        ApplyDryFieldTextureOverride();
+        ApplyDryFieldTextureOverride(textures);
         var changedMaterials = 0;
-        var materials = Resources.FindObjectsOfTypeAll<Material>();
 
         foreach (var material in materials)
         {
-            if (material == null || material.shader == null)
+            if (material == null
+                || material.shader == null
+                || (trackProcessedMaterials
+                    && ProcessedMaterialIds.Contains(material.GetInstanceID())))
             {
                 continue;
             }
@@ -410,12 +429,17 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                 changedMaterials += ApplySurfaceTextureOverride(material, "_MainTex");
                 changedMaterials += ApplySurfaceTextureOverride(material, "_BumpMap");
             }
+
+            if (trackProcessedMaterials)
+            {
+                ProcessedMaterialIds.Add(material.GetInstanceID());
+            }
         }
 
         Debug.Log($"[Timberborn HD] Applied HD terrain textures to {changedMaterials} materials.");
     }
 
-    private static void ApplyDryFieldTextureOverride()
+    private static void ApplyDryFieldTextureOverride(Texture2D[] textures)
     {
         if (string.IsNullOrWhiteSpace(_modPath))
         {
@@ -424,7 +448,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
         try
         {
-            var candidates = Resources.FindObjectsOfTypeAll<Texture2D>()
+            var candidates = textures
                 .Where(texture => texture != null
                                   && texture.name == OriginalDryFieldTextureName
                                   && !OverriddenDryFieldTextureIds.Contains(texture.GetInstanceID()))
@@ -663,9 +687,9 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         return 1;
     }
 
-    private static IEnumerator PrepareTreeTextureOverrides()
+    private static IEnumerator PrepareTreeTextureOverrides(Texture2D[] textures)
     {
-        var texturesByName = Resources.FindObjectsOfTypeAll<Texture2D>()
+        var texturesByName = textures
             .Where(texture => texture != null && !string.IsNullOrWhiteSpace(texture.name))
             .GroupBy(texture => texture.name)
             .ToDictionary(
@@ -696,9 +720,9 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         Debug.Log($"[Timberborn HD] Prepared {preparedTextures} runtime 2K tree atlases.");
     }
 
-    private static IEnumerator PrepareCropTextureOverrides()
+    private static IEnumerator PrepareCropTextureOverrides(Material[] materials)
     {
-        var cropMaterials = Resources.FindObjectsOfTypeAll<Material>()
+        var cropMaterials = materials
             .Where(material => material != null
                                && material.shader != null
                                && material.shader.name == VegetationShaderName
@@ -740,9 +764,9 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         Debug.Log($"[Timberborn HD] Prepared {preparedTextures} runtime 2K crop atlases.");
     }
 
-    private static IEnumerator PrepareSurfaceTextureOverrides()
+    private static IEnumerator PrepareSurfaceTextureOverrides(Material[] materials)
     {
-        var materials = Resources.FindObjectsOfTypeAll<Material>()
+        var targetMaterials = materials
             .Where(material => material != null
                                && material.shader != null
                                && material.shader.name == EnvironmentShaderName
@@ -750,7 +774,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             .ToArray();
         var preparedTextures = 0;
 
-        foreach (var material in materials)
+        foreach (var material in targetMaterials)
         {
             var normalizedMaterialName = NormalizeMaterialName(material.name);
             var targetSize = normalizedMaterialName == "Box" ? 1024 : 2048;
@@ -1027,7 +1051,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         public bool NormalizeNormals { get; }
     }
 
-    private static void WriteTreeTextureDumps()
+    private static void WriteTreeTextureDumps(Texture2D[] textures)
     {
         if (string.IsNullOrWhiteSpace(_modPath))
         {
@@ -1039,12 +1063,12 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             var dumpDirectory = Path.Combine(_modPath, TreeDumpDirectoryName);
             Directory.CreateDirectory(dumpDirectory);
             var dumpedTextures = 0;
-            var textures = Resources.FindObjectsOfTypeAll<Texture2D>()
+            var matchingTextures = textures
                 .Where(texture => texture != null && TreeTextureNames.Contains(texture.name))
                 .GroupBy(texture => texture.name)
                 .Select(group => group.OrderByDescending(texture => texture.width * texture.height).First());
 
-            foreach (var texture in textures)
+            foreach (var texture in matchingTextures)
             {
                 var dumpPath = Path.Combine(dumpDirectory, $"{texture.name}.png");
                 if (File.Exists(dumpPath))
@@ -1064,7 +1088,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
     }
 
-    private static void WriteTerrainTextureDumps()
+    private static void WriteTerrainTextureDumps(Texture2D[] textures)
     {
         if (string.IsNullOrWhiteSpace(_modPath))
         {
@@ -1076,12 +1100,12 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             var dumpDirectory = Path.Combine(_modPath, TerrainDumpDirectoryName);
             Directory.CreateDirectory(dumpDirectory);
             var dumpedTextures = 0;
-            var textures = Resources.FindObjectsOfTypeAll<Texture2D>()
+            var matchingTextures = textures
                 .Where(texture => texture != null && TerrainTextureNames.Contains(texture.name))
                 .GroupBy(texture => texture.name)
                 .Select(group => group.OrderByDescending(texture => texture.width * texture.height).First());
 
-            foreach (var texture in textures)
+            foreach (var texture in matchingTextures)
             {
                 var dumpPath = Path.Combine(dumpDirectory, $"{texture.name}.png");
                 if (File.Exists(dumpPath))
@@ -1137,7 +1161,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
     }
 
-    private static void WriteTextureInventory()
+    private static void WriteTextureInventory(Texture2D[] textures)
     {
         if (string.IsNullOrWhiteSpace(_modPath))
         {
@@ -1146,7 +1170,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
         try
         {
-            var textures = Resources.FindObjectsOfTypeAll<Texture2D>()
+            var inventoryTextures = textures
                 .Where(texture => texture != null && !string.IsNullOrWhiteSpace(texture.name))
                 .GroupBy(texture => texture.name)
                 .Select(group => group.OrderByDescending(texture => texture.width * texture.height).First())
@@ -1156,7 +1180,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             var csv = new StringBuilder();
             csv.AppendLine("Name,Width,Height,Format,WrapMode,FilterMode,AnisoLevel");
 
-            foreach (var texture in textures)
+            foreach (var texture in inventoryTextures)
             {
                 csv.Append(EscapeCsv(texture.name)).Append(',');
                 csv.Append(texture.width).Append(',');
@@ -1169,7 +1193,8 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
             var inventoryPath = Path.Combine(_modPath, TextureInventoryFileName);
             File.WriteAllText(inventoryPath, csv.ToString());
-            Debug.Log($"[Timberborn HD] Wrote {textures.Length} texture records to {inventoryPath}");
+            Debug.Log(
+                $"[Timberborn HD] Wrote {inventoryTextures.Length} texture records to {inventoryPath}");
         }
         catch (System.Exception exception)
         {
@@ -1177,7 +1202,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
     }
 
-    private static void WriteMaterialInventory()
+    private static void WriteMaterialInventory(Material[] materials)
     {
         if (string.IsNullOrWhiteSpace(_modPath))
         {
@@ -1186,7 +1211,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
         try
         {
-            var materials = Resources.FindObjectsOfTypeAll<Material>()
+            var inventoryMaterials = materials
                 .Where(material => material != null && !string.IsNullOrWhiteSpace(material.name))
                 .OrderBy(material => material.name)
                 .ThenBy(material => material.shader != null ? material.shader.name : string.Empty)
@@ -1197,7 +1222,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             var uniqueBindings = new HashSet<string>();
             var bindingCount = 0;
 
-            foreach (var material in materials)
+            foreach (var material in inventoryMaterials)
             {
                 var shaderName = material.shader != null ? material.shader.name : string.Empty;
                 var materialName = material.name.Replace(" (Instance)", string.Empty);

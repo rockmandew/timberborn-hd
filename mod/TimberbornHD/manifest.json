@@ -1,9 +1,9 @@
 {
   "Name": "Timberborn HD",
-  "Version": "0.14.0",
+  "Version": "0.14.1",
   "Id": "rockmandew.TimberbornHD",
   "MinimumGameVersion": "1.0.0.0",
-  "Description": "Adds color-faithful 2K terrain, crops, shared building surfaces, and carried resources.",
+  "Description": "Optimized color-faithful 2K terrain, crops, buildings, and carried resources.",
   "RequiredMods": [],
   "OptionalMods": []
 }
