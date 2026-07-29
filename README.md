@@ -24,6 +24,13 @@ milestone improves texture sampling without replacing the game's art:
   and material atlases, while retaining native maps that are already 2K or 4K.
 - crop discovery for both factions, including berries, carrots, potatoes,
   wheat, sunflowers, aquatic crops, and Iron Teeth food plants.
+- color-preserving 2K albedo and normal enhancement for shared wood, irregular
+  planks, plastered wood, thatch, roof planks, base metal, painted metal, and
+  detail materials.
+- 2K carried-resource atlases for visible transported goods and a focused 1K
+  enhancement for the original 256px storage-box material.
+- runtime compression for generated atlases, keeping the high-resolution pass
+  practical without expanding every AO or metallic map.
 - targeted runtime replacement of DirtURP and TerrainURP texture bindings.
 
 This is the foundation for later high-resolution PBR texture packs, material

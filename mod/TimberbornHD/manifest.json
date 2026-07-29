@@ -1,9 +1,9 @@
 {
   "Name": "Timberborn HD",
-  "Version": "0.13.1",
+  "Version": "0.14.0",
   "Id": "rockmandew.TimberbornHD",
   "MinimumGameVersion": "1.0.0.0",
-  "Description": "Adds color-faithful 2K terrain, cultivated soil, trees, and enhanced food-crop atlases.",
+  "Description": "Adds color-faithful 2K terrain, crops, shared building surfaces, and carried resources.",
   "RequiredMods": [],
   "OptionalMods": []
 }

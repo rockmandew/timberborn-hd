@@ -15,6 +15,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const float SceneLoadDelaySeconds = 1.0f;
     private const string TextureInventoryFileName = "TimberbornHD-textures.csv";
     private const string MaterialInventoryFileName = "TimberbornHD-materials.csv";
+    private const string EnhancementReportFileName = "TimberbornHD-enhancements.csv";
     private const string DryGroundDiagnosticsFileName = "TimberbornHD-dryfield-global.txt";
     private const string DirtShaderName = "Shader Graphs/DirtURP";
     private const string DirtTextureProperty = "_MainTex";
@@ -37,6 +38,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const string DryGroundAlbedoRelativePath =
         "Textures/Terrain/ground-dry-original-palette-albedo.png";
     private const string VegetationShaderName = "Shader Graphs/VegetationURP";
+    private const string EnvironmentShaderName = "Shader Graphs/EnvironmentURP";
     private const string VegetationAlbedoProperty = "_MainTex";
     private const string VegetationNormalProperty = "_BumpMap";
     private const string TreeDumpDirectoryName = "TextureDumps/Trees";
@@ -114,6 +116,30 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         new("_MetallicGlossMap", linear: true, sharpenAlbedo: false, normalizeNormals: false)
     };
 
+    private static readonly string[] SharedSurfaceMaterialPrefixes =
+    {
+        "BaseMetal",
+        "BaseWood",
+        "Details",
+        "IrregularPlanks",
+        "PaintedMetal",
+        "PlasteredWood",
+        "RoofPlanks",
+        "ThatchedRoof"
+    };
+
+    private static readonly HashSet<string> ResourceSurfaceMaterialNames = new()
+    {
+        "BeaverCarryingModels",
+        "Box"
+    };
+
+    private static readonly SurfaceTextureProperty[] SurfaceTextureProperties =
+    {
+        new("_MainTex", linear: false, sharpenAlbedo: true, normalizeNormals: false),
+        new("_BumpMap", linear: true, sharpenAlbedo: false, normalizeNormals: true)
+    };
+
     public static GraphicsEnhancer? Instance { get; private set; }
     private static string? _modPath;
     private static Texture2D? _soilAlbedo;
@@ -124,6 +150,8 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static Texture2D? _dryGroundAlbedo;
     private static readonly Dictionary<string, Texture2D> TreeTextureOverrides = new();
     private static readonly Dictionary<string, Texture2D> CropTextureOverrides = new();
+    private static readonly Dictionary<string, Texture2D> SurfaceTextureOverrides = new();
+    private static readonly List<string> RuntimeEnhancementRecords = new();
     private static readonly HashSet<int> OverriddenDryFieldTextureIds = new();
     private static int _desertShaderPropertyId = -1;
     private static int _wetFieldShaderPropertyId = -1;
@@ -184,10 +212,12 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         yield return new WaitForSecondsRealtime(SceneLoadDelaySeconds);
         yield return PrepareTreeTextureOverrides();
         yield return PrepareCropTextureOverrides();
+        yield return PrepareSurfaceTextureOverrides();
         ApplyTextureQuality();
         ApplyMaterialOverrides();
         WriteTextureInventory();
         WriteMaterialInventory();
+        WriteEnhancementReport();
         WriteTreeTextureDumps();
         WriteTerrainTextureDumps();
     }
@@ -373,6 +403,12 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                 changedMaterials += ApplyVegetationTextureOverride(material, VegetationNormalProperty);
                 changedMaterials += ApplyVegetationTextureOverride(material, "_DetailMap");
                 changedMaterials += ApplyVegetationTextureOverride(material, "_MetallicGlossMap");
+            }
+
+            if (material.shader.name == EnvironmentShaderName)
+            {
+                changedMaterials += ApplySurfaceTextureOverride(material, "_MainTex");
+                changedMaterials += ApplySurfaceTextureOverride(material, "_BumpMap");
             }
         }
 
@@ -608,6 +644,25 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         return 1;
     }
 
+    private static int ApplySurfaceTextureOverride(Material material, string propertyName)
+    {
+        if (!material.HasProperty(propertyName))
+        {
+            return 0;
+        }
+
+        var currentTexture = material.GetTexture(propertyName);
+        if (currentTexture == null
+            || !SurfaceTextureOverrides.TryGetValue(currentTexture.name, out var replacement)
+            || currentTexture == replacement)
+        {
+            return 0;
+        }
+
+        material.SetTexture(propertyName, replacement);
+        return 1;
+    }
+
     private static IEnumerator PrepareTreeTextureOverrides()
     {
         var texturesByName = Resources.FindObjectsOfTypeAll<Texture2D>()
@@ -633,6 +688,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                 specification.SharpenAlbedo,
                 specification.NormalizeNormals);
             TreeTextureOverrides.Add(specification.SourceName, replacement);
+            RecordRuntimeEnhancement("Tree", source, replacement);
             preparedTextures++;
             yield return null;
         }
@@ -675,12 +731,72 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                     textureProperty.SharpenAlbedo,
                     textureProperty.NormalizeNormals);
                 CropTextureOverrides.Add(source.name, replacement);
+                RecordRuntimeEnhancement("Crop", source, replacement);
                 preparedTextures++;
                 yield return null;
             }
         }
 
         Debug.Log($"[Timberborn HD] Prepared {preparedTextures} runtime 2K crop atlases.");
+    }
+
+    private static IEnumerator PrepareSurfaceTextureOverrides()
+    {
+        var materials = Resources.FindObjectsOfTypeAll<Material>()
+            .Where(material => material != null
+                               && material.shader != null
+                               && material.shader.name == EnvironmentShaderName
+                               && IsTargetSurfaceMaterial(material.name))
+            .ToArray();
+        var preparedTextures = 0;
+
+        foreach (var material in materials)
+        {
+            var normalizedMaterialName = NormalizeMaterialName(material.name);
+            var targetSize = normalizedMaterialName == "Box" ? 1024 : 2048;
+
+            foreach (var textureProperty in SurfaceTextureProperties)
+            {
+                if (!material.HasProperty(textureProperty.PropertyName))
+                {
+                    continue;
+                }
+
+                var source = material.GetTexture(textureProperty.PropertyName) as Texture2D;
+                if (source == null
+                    || source.width >= targetSize
+                    || source.height >= targetSize
+                    || SurfaceTextureOverrides.ContainsKey(source.name))
+                {
+                    continue;
+                }
+
+                var replacement = CreateUpscaledTexture(
+                    source,
+                    $"TimberbornHD_Surface_{source.name}_{targetSize}",
+                    textureProperty.Linear,
+                    textureProperty.SharpenAlbedo,
+                    textureProperty.NormalizeNormals,
+                    targetSize);
+                SurfaceTextureOverrides.Add(source.name, replacement);
+                RecordRuntimeEnhancement("Surface", source, replacement);
+                preparedTextures++;
+                yield return null;
+            }
+        }
+
+        Debug.Log(
+            $"[Timberborn HD] Prepared {preparedTextures} color-faithful building/resource atlases.");
+    }
+
+    private static bool IsTargetSurfaceMaterial(string materialName)
+    {
+        var normalizedMaterialName = NormalizeMaterialName(materialName);
+        return ResourceSurfaceMaterialNames.Contains(normalizedMaterialName)
+               || SharedSurfaceMaterialPrefixes.Any(
+                   prefix => normalizedMaterialName.StartsWith(
+                       prefix,
+                       System.StringComparison.Ordinal));
     }
 
     private static string NormalizeMaterialName(string materialName)
@@ -701,9 +817,9 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         string textureName,
         bool linear,
         bool sharpenAlbedo,
-        bool normalizeNormals)
+        bool normalizeNormals,
+        int targetSize = 2048)
     {
-        const int targetSize = 2048;
         var previousActive = RenderTexture.active;
         var renderTexture = RenderTexture.GetTemporary(
             targetSize,
@@ -739,6 +855,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
             result.SetPixels32(pixels);
             result.Apply(true, false);
+            CompressRuntimeTexture(result);
             return result;
         }
         catch
@@ -755,6 +872,31 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             RenderTexture.active = previousActive;
             RenderTexture.ReleaseTemporary(renderTexture);
         }
+    }
+
+    private static void CompressRuntimeTexture(Texture2D texture)
+    {
+        try
+        {
+            texture.Compress(true);
+            texture.Apply(true, true);
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning(
+                $"[Timberborn HD] Could not compress {texture.name}: {exception.Message}");
+            texture.Apply(true, true);
+        }
+    }
+
+    private static void RecordRuntimeEnhancement(
+        string category,
+        Texture2D source,
+        Texture2D replacement)
+    {
+        RuntimeEnhancementRecords.Add(
+            $"{EscapeCsv(category)},{EscapeCsv(source.name)},{source.width},{source.height},"
+            + $"{EscapeCsv(replacement.name)},{replacement.width},{replacement.height}");
     }
 
     private static void SharpenColorPixels(Color32[] pixels, int width, int height)
@@ -848,6 +990,26 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private readonly struct CropTextureProperty
     {
         public CropTextureProperty(
+            string propertyName,
+            bool linear,
+            bool sharpenAlbedo,
+            bool normalizeNormals)
+        {
+            PropertyName = propertyName;
+            Linear = linear;
+            SharpenAlbedo = sharpenAlbedo;
+            NormalizeNormals = normalizeNormals;
+        }
+
+        public string PropertyName { get; }
+        public bool Linear { get; }
+        public bool SharpenAlbedo { get; }
+        public bool NormalizeNormals { get; }
+    }
+
+    private readonly struct SurfaceTextureProperty
+    {
+        public SurfaceTextureProperty(
             string propertyName,
             bool linear,
             bool sharpenAlbedo,
@@ -1082,6 +1244,32 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         catch (System.Exception exception)
         {
             Debug.LogWarning($"[Timberborn HD] Could not write the material inventory: {exception.Message}");
+        }
+    }
+
+    private static void WriteEnhancementReport()
+    {
+        if (string.IsNullOrWhiteSpace(_modPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var report = new List<string>
+            {
+                "Category,Source,SourceWidth,SourceHeight,Replacement,ReplacementWidth,ReplacementHeight"
+            };
+            report.AddRange(RuntimeEnhancementRecords.Distinct().OrderBy(record => record));
+            var reportPath = Path.Combine(_modPath, EnhancementReportFileName);
+            File.WriteAllLines(reportPath, report);
+            Debug.Log(
+                $"[Timberborn HD] Wrote {report.Count - 1} runtime enhancements to {reportPath}");
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning(
+                $"[Timberborn HD] Could not write the enhancement report: {exception.Message}");
         }
     }
 
