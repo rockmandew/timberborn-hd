@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 
 namespace TimberbornHD;
@@ -14,6 +15,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const float SceneLoadDelaySeconds = 1.0f;
     private const string TextureInventoryFileName = "TimberbornHD-textures.csv";
     private const string MaterialInventoryFileName = "TimberbornHD-materials.csv";
+    private const string DryFieldDiagnosticsFileName = "TimberbornHD-dryfield-global.txt";
     private const string DirtShaderName = "Shader Graphs/DirtURP";
     private const string DirtTextureProperty = "_MainTex";
     private const string OriginalDirtTextureName = "Dirt";
@@ -94,6 +96,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static readonly HashSet<int> OverriddenDryFieldTextureIds = new();
     private static int _dryFieldShaderPropertyId = -1;
     private static bool _dryFieldShaderPropertyLookupAttempted;
+    private static bool _dryFieldRenderDiagnosticWritten;
 
     public static void Configure(string modPath)
     {
@@ -113,6 +116,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         QualitySettings.globalTextureMipmapLimit = 0;
         LoadReplacementTextures();
         SceneManager.sceneLoaded += OnSceneLoaded;
+        RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
         ApplyTextureQuality();
         ApplyMaterialOverrides();
     }
@@ -122,6 +126,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         if (Instance == this)
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
+            RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
             Instance = null;
         }
     }
@@ -129,6 +134,11 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private void LateUpdate()
     {
         ApplyDryFieldGlobalOverride();
+    }
+
+    private static void OnBeginCameraRendering(ScriptableRenderContext context, Camera camera)
+    {
+        ApplyDryFieldGlobalOverride(writeDiagnostics: true, cameraName: camera.name);
     }
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode loadSceneMode)
@@ -375,7 +385,9 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
     }
 
-    private static void ApplyDryFieldGlobalOverride()
+    private static void ApplyDryFieldGlobalOverride(
+        bool writeDiagnostics = false,
+        string cameraName = "")
     {
         if (_dryGroundAlbedo == null)
         {
@@ -418,8 +430,56 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
         if (_dryFieldShaderPropertyId >= 0)
         {
+            var textureBeforeBinding = Shader.GetGlobalTexture(_dryFieldShaderPropertyId);
             Shader.SetGlobalTexture(_dryFieldShaderPropertyId, _dryGroundAlbedo);
+
+            if (writeDiagnostics && !_dryFieldRenderDiagnosticWritten)
+            {
+                WriteDryFieldGlobalDiagnostics(textureBeforeBinding, cameraName);
+            }
         }
+    }
+
+    private static void WriteDryFieldGlobalDiagnostics(Texture? textureBeforeBinding, string cameraName)
+    {
+        if (string.IsNullOrWhiteSpace(_modPath)
+            || _dryGroundAlbedo == null
+            || _dryFieldShaderPropertyId < 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var textureAfterBinding = Shader.GetGlobalTexture(_dryFieldShaderPropertyId);
+            var diagnostic = new StringBuilder();
+            diagnostic.Append("Camera=").AppendLine(cameraName);
+            diagnostic.Append("PropertyId=").AppendLine(_dryFieldShaderPropertyId.ToString());
+            diagnostic.Append("Before=").AppendLine(DescribeTexture(textureBeforeBinding));
+            diagnostic.Append("Requested=").AppendLine(DescribeTexture(_dryGroundAlbedo));
+            diagnostic.Append("After=").AppendLine(DescribeTexture(textureAfterBinding));
+            diagnostic.Append("BoundImmediatelyBeforeRender=")
+                .AppendLine((textureAfterBinding == _dryGroundAlbedo).ToString());
+
+            File.WriteAllText(
+                Path.Combine(_modPath, DryFieldDiagnosticsFileName),
+                diagnostic.ToString());
+            _dryFieldRenderDiagnosticWritten = true;
+            Debug.Log(
+                "[Timberborn HD] Reasserted the HD dry terrain texture immediately before camera rendering.");
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning(
+                $"[Timberborn HD] Could not write DryField render diagnostics: {exception.Message}");
+        }
+    }
+
+    private static string DescribeTexture(Texture? texture)
+    {
+        return texture == null
+            ? "<null>"
+            : $"{texture.name}|{texture.width}x{texture.height}|InstanceId={texture.GetInstanceID()}";
     }
 
     private static int ApplyTreeTextureOverride(Material material, string propertyName)
