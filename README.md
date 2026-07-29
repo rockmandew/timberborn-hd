@@ -35,6 +35,10 @@ milestone improves texture sampling without replacing the game's art:
   previously processed texture/material instances, and binds terrain only at
   the render boundary.
 - release packaging that excludes unused source maps and development metadata.
+- persistent local cache for compressed runtime-generated tree, crop, building,
+  and carried-resource atlases. Cache keys include the Timberborn version,
+  source texture metadata, target resolution, color space, and processing
+  settings.
 - targeted runtime replacement of DirtURP and TerrainURP texture bindings.
 
 This is the foundation for later high-resolution PBR texture packs, material
@@ -46,9 +50,13 @@ the installed mod's `manifest.json`, then restart Timberborn.
 
 ## Optimization roadmap
 
-- Cache locally generated, compressed runtime atlases using source hashes.
 - Package original Timberborn HD terrain assets in a Unity AssetBundle for
   GPU-ready loading while keeping game-derived textures local to each player.
+
+The first launch after installing or updating may still prepare runtime atlases.
+Subsequent launches load the compressed results from
+`Cache/RuntimeAtlases/v1`. Delete that directory to force a clean rebuild; game
+or processing-version changes automatically select new cache entries.
 
 ## Compatibility
 

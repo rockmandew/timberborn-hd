@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -17,6 +18,10 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const string MaterialInventoryFileName = "TimberbornHD-materials.csv";
     private const string EnhancementReportFileName = "TimberbornHD-enhancements.csv";
     private const string DiagnosticsOptInFileName = "enable-diagnostics.txt";
+    private const string RuntimeCacheRelativePath = "Cache/RuntimeAtlases/v1";
+    private const int RuntimeCacheMagic = 0x54424844;
+    private const int RuntimeCacheVersion = 1;
+    private const int MaximumCachedTextureBytes = 128 * 1024 * 1024;
     private const string DryGroundDiagnosticsFileName = "TimberbornHD-dryfield-global.txt";
     private const string DirtShaderName = "Shader Graphs/DirtURP";
     private const string DirtTextureProperty = "_MainTex";
@@ -162,6 +167,9 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static bool _terrainShaderPropertyLookupAttempted;
     private static bool _dryGroundRenderDiagnosticWritten;
     private static bool _developmentDiagnosticsEnabled;
+    private static int _runtimeCacheHits;
+    private static int _runtimeCacheMisses;
+    private static int _runtimeCacheWrites;
 
     public static void Configure(string modPath)
     {
@@ -220,6 +228,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         yield return PrepareTreeTextureOverrides(textures);
         yield return PrepareCropTextureOverrides(materials);
         yield return PrepareSurfaceTextureOverrides(materials);
+        LogRuntimeCacheMetrics();
         ApplyTextureQuality(textures);
         ApplyMaterialOverrides(textures, materials, trackProcessedMaterials: true);
 
@@ -844,6 +853,23 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         bool normalizeNormals,
         int targetSize = 2048)
     {
+        var cacheKey = CreateRuntimeCacheKey(
+            source,
+            linear,
+            sharpenAlbedo,
+            normalizeNormals,
+            targetSize);
+        if (TryLoadRuntimeCachedTexture(
+                source,
+                textureName,
+                linear,
+                targetSize,
+                cacheKey,
+                out var cachedTexture))
+        {
+            return cachedTexture;
+        }
+
         var previousActive = RenderTexture.active;
         var renderTexture = RenderTexture.GetTemporary(
             targetSize,
@@ -879,7 +905,12 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
             result.SetPixels32(pixels);
             result.Apply(true, false);
-            CompressRuntimeTexture(result);
+            if (CompressRuntimeTexture(result))
+            {
+                TryWriteRuntimeCachedTexture(result, cacheKey, linear);
+            }
+
+            result.Apply(false, true);
             return result;
         }
         catch
@@ -898,19 +929,201 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
     }
 
-    private static void CompressRuntimeTexture(Texture2D texture)
+    private static bool CompressRuntimeTexture(Texture2D texture)
     {
         try
         {
             texture.Compress(true);
-            texture.Apply(true, true);
+            texture.Apply(false, false);
+            return true;
         }
         catch (System.Exception exception)
         {
             Debug.LogWarning(
                 $"[Timberborn HD] Could not compress {texture.name}: {exception.Message}");
-            texture.Apply(true, true);
+            return false;
         }
+    }
+
+    private static string CreateRuntimeCacheKey(
+        Texture2D source,
+        bool linear,
+        bool sharpenAlbedo,
+        bool normalizeNormals,
+        int targetSize)
+    {
+        var sourceIdentity = new StringBuilder();
+        sourceIdentity.Append(RuntimeCacheVersion).Append('|');
+        sourceIdentity.Append(source.name).Append('|');
+        sourceIdentity.Append(source.width).Append('x').Append(source.height).Append('|');
+        sourceIdentity.Append(source.format).Append('|');
+        sourceIdentity.Append(source.mipmapCount).Append('|');
+        sourceIdentity.Append(Application.version).Append('|');
+        sourceIdentity.Append(targetSize).Append('|');
+        sourceIdentity.Append(linear).Append('|');
+        sourceIdentity.Append(sharpenAlbedo).Append('|');
+        sourceIdentity.Append(normalizeNormals);
+
+        using var sha256 = SHA256.Create();
+        var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(sourceIdentity.ToString()));
+        return System.BitConverter.ToString(hash).Replace("-", string.Empty).ToLowerInvariant();
+    }
+
+    private static bool TryLoadRuntimeCachedTexture(
+        Texture2D source,
+        string textureName,
+        bool linear,
+        int targetSize,
+        string cacheKey,
+        out Texture2D texture)
+    {
+        texture = null!;
+        if (string.IsNullOrWhiteSpace(_modPath))
+        {
+            _runtimeCacheMisses++;
+            return false;
+        }
+
+        var cachePath = GetRuntimeCachePath(cacheKey);
+        if (!File.Exists(cachePath))
+        {
+            _runtimeCacheMisses++;
+            return false;
+        }
+
+        Texture2D? cachedTexture = null;
+
+        try
+        {
+            using var stream = File.OpenRead(cachePath);
+            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
+            if (reader.ReadInt32() != RuntimeCacheMagic
+                || reader.ReadInt32() != RuntimeCacheVersion
+                || reader.ReadString() != cacheKey)
+            {
+                throw new InvalidDataException("Cache header does not match.");
+            }
+
+            var width = reader.ReadInt32();
+            var height = reader.ReadInt32();
+            var textureFormat = (TextureFormat)reader.ReadInt32();
+            var mipmapCount = reader.ReadInt32();
+            var cachedLinear = reader.ReadBoolean();
+            var rawDataLength = reader.ReadInt32();
+
+            if (width != targetSize
+                || height != targetSize
+                || cachedLinear != linear
+                || mipmapCount <= 0
+                || rawDataLength <= 0
+                || rawDataLength > MaximumCachedTextureBytes
+                || rawDataLength != stream.Length - stream.Position)
+            {
+                throw new InvalidDataException("Cache metadata is invalid.");
+            }
+
+            var rawTextureData = reader.ReadBytes(rawDataLength);
+            if (rawTextureData.Length != rawDataLength)
+            {
+                throw new EndOfStreamException("Cache texture data is incomplete.");
+            }
+
+            cachedTexture = new Texture2D(
+                width,
+                height,
+                textureFormat,
+                mipmapCount > 1,
+                linear)
+            {
+                name = textureName,
+                wrapMode = source.wrapMode,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = MaximumAnisotropicLevel
+            };
+            cachedTexture.LoadRawTextureData(rawTextureData);
+            cachedTexture.Apply(false, true);
+
+            if (cachedTexture.mipmapCount != mipmapCount)
+            {
+                throw new InvalidDataException("Cache mipmap count does not match.");
+            }
+
+            texture = cachedTexture;
+            _runtimeCacheHits++;
+            return true;
+        }
+        catch (System.Exception exception)
+        {
+            if (cachedTexture != null)
+            {
+                Object.Destroy(cachedTexture);
+            }
+
+            _runtimeCacheMisses++;
+            Debug.LogWarning(
+                $"[Timberborn HD] Ignored invalid runtime cache for {source.name}: {exception.Message}");
+            return false;
+        }
+    }
+
+    private static void TryWriteRuntimeCachedTexture(
+        Texture2D texture,
+        string cacheKey,
+        bool linear)
+    {
+        if (string.IsNullOrWhiteSpace(_modPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var rawTextureData = texture.GetRawTextureData();
+            if (rawTextureData.Length <= 0 || rawTextureData.Length > MaximumCachedTextureBytes)
+            {
+                return;
+            }
+
+            var cachePath = GetRuntimeCachePath(cacheKey);
+            Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+            using (var stream = new FileStream(
+                       cachePath,
+                       FileMode.Create,
+                       FileAccess.Write,
+                       FileShare.None))
+            using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: false))
+            {
+                writer.Write(RuntimeCacheMagic);
+                writer.Write(RuntimeCacheVersion);
+                writer.Write(cacheKey);
+                writer.Write(texture.width);
+                writer.Write(texture.height);
+                writer.Write((int)texture.format);
+                writer.Write(texture.mipmapCount);
+                writer.Write(linear);
+                writer.Write(rawTextureData.Length);
+                writer.Write(rawTextureData);
+            }
+
+            _runtimeCacheWrites++;
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning(
+                $"[Timberborn HD] Could not cache {texture.name}: {exception.Message}");
+        }
+    }
+
+    private static string GetRuntimeCachePath(string cacheKey)
+    {
+        return Path.Combine(_modPath!, RuntimeCacheRelativePath, $"{cacheKey}.tbhd");
+    }
+
+    private static void LogRuntimeCacheMetrics()
+    {
+        Debug.Log(
+            $"[Timberborn HD] Runtime atlas cache: {_runtimeCacheHits} hits, "
+            + $"{_runtimeCacheMisses} misses, {_runtimeCacheWrites} writes.");
     }
 
     private static void RecordRuntimeEnhancement(

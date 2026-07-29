@@ -1,9 +1,9 @@
 {
   "Name": "Timberborn HD",
-  "Version": "0.14.1",
+  "Version": "0.15.0",
   "Id": "rockmandew.TimberbornHD",
   "MinimumGameVersion": "1.0.0.0",
-  "Description": "Optimized color-faithful 2K terrain, crops, buildings, and carried resources.",
+  "Description": "Optimized 2K graphics with persistent GPU-ready runtime atlas caching.",
   "RequiredMods": [],
   "OptionalMods": []
 }
