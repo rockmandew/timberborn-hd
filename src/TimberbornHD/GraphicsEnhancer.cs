@@ -34,7 +34,8 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const string CliffNormalRelativePath = "Textures/Terrain/cliff-shale-normal.png";
     private const string OriginalGroundTextureName = "Ground";
     private const string OriginalDryFieldTextureName = "DryField";
-    private const string DryGroundAlbedoRelativePath = "Textures/Terrain/ground-dry-albedo.png";
+    private const string DryGroundAlbedoRelativePath =
+        "Textures/Terrain/ground-dry-original-palette-albedo.png";
     private const string VegetationShaderName = "Shader Graphs/VegetationURP";
     private const string VegetationAlbedoProperty = "_MainTex";
     private const string VegetationNormalProperty = "_BumpMap";

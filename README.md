@@ -16,7 +16,8 @@ milestone improves texture sampling without replacing the game's art:
   while preserving badwater contamination.
 - replacement of both Timberborn's natural `DesertTexture` channel and its
   agricultural `DryField` channel, reasserted immediately before every camera
-  render while preserving badwater contamination.
+  render while preserving badwater contamination and the original dark,
+  neutral terrain palette under all three dryness shades.
 - 2K cultivated-soil replacement for field meshes and the global wet-field
   channel.
 - targeted 2K runtime enhancement of loaded food-crop albedo, normal, detail,
