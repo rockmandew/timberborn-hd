@@ -14,8 +14,9 @@ milestone improves texture sampling without replacing the game's art:
 - in-place replacement of Timberborn's hidden `DryField` texture with finer
   parched hardpan plus a global shader override through `TerrainMaterialMap`,
   while preserving badwater contamination.
-- reassertion of the dry-ground texture immediately before every camera render,
-  preventing Timberborn's terrain service from restoring the original surface.
+- replacement of both Timberborn's natural `DesertTexture` channel and its
+  agricultural `DryField` channel, reasserted immediately before every camera
+  render while preserving badwater contamination.
 - targeted runtime replacement of DirtURP and TerrainURP texture bindings.
 
 This is the foundation for later high-resolution PBR texture packs, material

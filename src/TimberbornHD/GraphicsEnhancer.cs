@@ -15,7 +15,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private const float SceneLoadDelaySeconds = 1.0f;
     private const string TextureInventoryFileName = "TimberbornHD-textures.csv";
     private const string MaterialInventoryFileName = "TimberbornHD-materials.csv";
-    private const string DryFieldDiagnosticsFileName = "TimberbornHD-dryfield-global.txt";
+    private const string DryGroundDiagnosticsFileName = "TimberbornHD-dryfield-global.txt";
     private const string DirtShaderName = "Shader Graphs/DirtURP";
     private const string DirtTextureProperty = "_MainTex";
     private const string OriginalDirtTextureName = "Dirt";
@@ -94,9 +94,10 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static Texture2D? _dryGroundAlbedo;
     private static readonly Dictionary<string, Texture2D> TreeTextureOverrides = new();
     private static readonly HashSet<int> OverriddenDryFieldTextureIds = new();
+    private static int _desertShaderPropertyId = -1;
     private static int _dryFieldShaderPropertyId = -1;
-    private static bool _dryFieldShaderPropertyLookupAttempted;
-    private static bool _dryFieldRenderDiagnosticWritten;
+    private static bool _terrainShaderPropertyLookupAttempted;
+    private static bool _dryGroundRenderDiagnosticWritten;
 
     public static void Configure(string modPath)
     {
@@ -133,12 +134,12 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
     private void LateUpdate()
     {
-        ApplyDryFieldGlobalOverride();
+        ApplyDryGroundGlobalOverrides();
     }
 
     private static void OnBeginCameraRendering(ScriptableRenderContext context, Camera camera)
     {
-        ApplyDryFieldGlobalOverride(writeDiagnostics: true, cameraName: camera.name);
+        ApplyDryGroundGlobalOverrides(writeDiagnostics: true, cameraName: camera.name);
     }
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode loadSceneMode)
@@ -385,7 +386,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
     }
 
-    private static void ApplyDryFieldGlobalOverride(
+    private static void ApplyDryGroundGlobalOverrides(
         bool writeDiagnostics = false,
         string cameraName = "")
     {
@@ -394,84 +395,118 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             return;
         }
 
-        if (_dryFieldShaderPropertyId < 0 && !_dryFieldShaderPropertyLookupAttempted)
+        if (!_terrainShaderPropertyLookupAttempted)
         {
-            _dryFieldShaderPropertyLookupAttempted = true;
+            ResolveTerrainShaderPropertyIds();
+        }
 
-            try
-            {
-                var terrainAssembly = System.AppDomain.CurrentDomain.GetAssemblies()
-                    .FirstOrDefault(assembly => assembly.GetName().Name == "Timberborn.TerrainSystemRendering");
-                var terrainMaterialMapType = terrainAssembly?.GetType(
-                    "Timberborn.TerrainSystemRendering.TerrainMaterialMap");
-                var propertyField = terrainMaterialMapType?.GetField(
-                    "DryFieldTextureProperty",
-                    System.Reflection.BindingFlags.Static
-                    | System.Reflection.BindingFlags.Public
-                    | System.Reflection.BindingFlags.NonPublic);
+        Texture? desertTextureBeforeBinding = null;
+        Texture? dryFieldTextureBeforeBinding = null;
 
-                if (propertyField?.GetValue(null) is int propertyId)
-                {
-                    _dryFieldShaderPropertyId = propertyId;
-                    Debug.Log(
-                        $"[Timberborn HD] Resolved global DryField shader property ID {propertyId}.");
-                }
-                else
-                {
-                    Debug.LogWarning("[Timberborn HD] Could not resolve the global DryField shader property.");
-                }
-            }
-            catch (System.Exception exception)
-            {
-                Debug.LogWarning(
-                    $"[Timberborn HD] Could not inspect the global DryField shader property: {exception.Message}");
-            }
+        if (_desertShaderPropertyId >= 0)
+        {
+            desertTextureBeforeBinding = Shader.GetGlobalTexture(_desertShaderPropertyId);
+            Shader.SetGlobalTexture(_desertShaderPropertyId, _dryGroundAlbedo);
         }
 
         if (_dryFieldShaderPropertyId >= 0)
         {
-            var textureBeforeBinding = Shader.GetGlobalTexture(_dryFieldShaderPropertyId);
+            dryFieldTextureBeforeBinding = Shader.GetGlobalTexture(_dryFieldShaderPropertyId);
             Shader.SetGlobalTexture(_dryFieldShaderPropertyId, _dryGroundAlbedo);
+        }
 
-            if (writeDiagnostics && !_dryFieldRenderDiagnosticWritten)
-            {
-                WriteDryFieldGlobalDiagnostics(textureBeforeBinding, cameraName);
-            }
+        if (writeDiagnostics && !_dryGroundRenderDiagnosticWritten)
+        {
+            WriteDryGroundGlobalDiagnostics(
+                desertTextureBeforeBinding,
+                dryFieldTextureBeforeBinding,
+                cameraName);
         }
     }
 
-    private static void WriteDryFieldGlobalDiagnostics(Texture? textureBeforeBinding, string cameraName)
+    private static void ResolveTerrainShaderPropertyIds()
+    {
+        _terrainShaderPropertyLookupAttempted = true;
+
+        try
+        {
+            var terrainAssembly = System.AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(assembly => assembly.GetName().Name == "Timberborn.TerrainSystemRendering");
+            var terrainMaterialMapType = terrainAssembly?.GetType(
+                "Timberborn.TerrainSystemRendering.TerrainMaterialMap");
+            _desertShaderPropertyId = ResolveShaderPropertyId(
+                terrainMaterialMapType,
+                "DesertTextureProperty");
+            _dryFieldShaderPropertyId = ResolveShaderPropertyId(
+                terrainMaterialMapType,
+                "DryFieldTextureProperty");
+
+            Debug.Log(
+                $"[Timberborn HD] Resolved terrain shader properties: "
+                + $"Desert={_desertShaderPropertyId}, DryField={_dryFieldShaderPropertyId}.");
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning(
+                $"[Timberborn HD] Could not inspect terrain shader properties: {exception.Message}");
+        }
+    }
+
+    private static int ResolveShaderPropertyId(System.Type? terrainMaterialMapType, string fieldName)
+    {
+        var propertyField = terrainMaterialMapType?.GetField(
+            fieldName,
+            System.Reflection.BindingFlags.Static
+            | System.Reflection.BindingFlags.Public
+            | System.Reflection.BindingFlags.NonPublic);
+        return propertyField?.GetValue(null) is int propertyId ? propertyId : -1;
+    }
+
+    private static void WriteDryGroundGlobalDiagnostics(
+        Texture? desertTextureBeforeBinding,
+        Texture? dryFieldTextureBeforeBinding,
+        string cameraName)
     {
         if (string.IsNullOrWhiteSpace(_modPath)
             || _dryGroundAlbedo == null
-            || _dryFieldShaderPropertyId < 0)
+            || (_desertShaderPropertyId < 0 && _dryFieldShaderPropertyId < 0))
         {
             return;
         }
 
         try
         {
-            var textureAfterBinding = Shader.GetGlobalTexture(_dryFieldShaderPropertyId);
+            var desertTextureAfterBinding = _desertShaderPropertyId >= 0
+                ? Shader.GetGlobalTexture(_desertShaderPropertyId)
+                : null;
+            var dryFieldTextureAfterBinding = _dryFieldShaderPropertyId >= 0
+                ? Shader.GetGlobalTexture(_dryFieldShaderPropertyId)
+                : null;
             var diagnostic = new StringBuilder();
             diagnostic.Append("Camera=").AppendLine(cameraName);
-            diagnostic.Append("PropertyId=").AppendLine(_dryFieldShaderPropertyId.ToString());
-            diagnostic.Append("Before=").AppendLine(DescribeTexture(textureBeforeBinding));
             diagnostic.Append("Requested=").AppendLine(DescribeTexture(_dryGroundAlbedo));
-            diagnostic.Append("After=").AppendLine(DescribeTexture(textureAfterBinding));
-            diagnostic.Append("BoundImmediatelyBeforeRender=")
-                .AppendLine((textureAfterBinding == _dryGroundAlbedo).ToString());
+            diagnostic.Append("DesertPropertyId=").AppendLine(_desertShaderPropertyId.ToString());
+            diagnostic.Append("DesertBefore=").AppendLine(DescribeTexture(desertTextureBeforeBinding));
+            diagnostic.Append("DesertAfter=").AppendLine(DescribeTexture(desertTextureAfterBinding));
+            diagnostic.Append("DesertBoundImmediatelyBeforeRender=")
+                .AppendLine((desertTextureAfterBinding == _dryGroundAlbedo).ToString());
+            diagnostic.Append("DryFieldPropertyId=").AppendLine(_dryFieldShaderPropertyId.ToString());
+            diagnostic.Append("DryFieldBefore=").AppendLine(DescribeTexture(dryFieldTextureBeforeBinding));
+            diagnostic.Append("DryFieldAfter=").AppendLine(DescribeTexture(dryFieldTextureAfterBinding));
+            diagnostic.Append("DryFieldBoundImmediatelyBeforeRender=")
+                .AppendLine((dryFieldTextureAfterBinding == _dryGroundAlbedo).ToString());
 
             File.WriteAllText(
-                Path.Combine(_modPath, DryFieldDiagnosticsFileName),
+                Path.Combine(_modPath, DryGroundDiagnosticsFileName),
                 diagnostic.ToString());
-            _dryFieldRenderDiagnosticWritten = true;
+            _dryGroundRenderDiagnosticWritten = true;
             Debug.Log(
-                "[Timberborn HD] Reasserted the HD dry terrain texture immediately before camera rendering.");
+                "[Timberborn HD] Reasserted the HD desert and dry-field textures before camera rendering.");
         }
         catch (System.Exception exception)
         {
             Debug.LogWarning(
-                $"[Timberborn HD] Could not write DryField render diagnostics: {exception.Message}");
+                $"[Timberborn HD] Could not write dry-ground render diagnostics: {exception.Message}");
         }
     }
 
