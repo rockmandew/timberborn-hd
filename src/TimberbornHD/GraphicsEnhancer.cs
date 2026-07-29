@@ -84,6 +84,35 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         "SlopeSand"
     };
 
+    private static readonly HashSet<string> CropMaterialNames = new()
+    {
+        "Algae",
+        "Blueberry",
+        "Canola",
+        "Carrot",
+        "Cassava",
+        "Cattail",
+        "Coffee",
+        "Corn",
+        "Dandelion",
+        "Eggplant",
+        "Kohlrabi",
+        "Mushroom",
+        "Potato",
+        "Soybean",
+        "Spadderdock",
+        "Sunflower",
+        "Wheat"
+    };
+
+    private static readonly CropTextureProperty[] CropTextureProperties =
+    {
+        new(VegetationAlbedoProperty, linear: false, sharpenAlbedo: true, normalizeNormals: false),
+        new(VegetationNormalProperty, linear: true, sharpenAlbedo: false, normalizeNormals: true),
+        new("_DetailMap", linear: false, sharpenAlbedo: true, normalizeNormals: false),
+        new("_MetallicGlossMap", linear: true, sharpenAlbedo: false, normalizeNormals: false)
+    };
+
     public static GraphicsEnhancer? Instance { get; private set; }
     private static string? _modPath;
     private static Texture2D? _soilAlbedo;
@@ -93,8 +122,10 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     private static Texture2D? _cliffNormal;
     private static Texture2D? _dryGroundAlbedo;
     private static readonly Dictionary<string, Texture2D> TreeTextureOverrides = new();
+    private static readonly Dictionary<string, Texture2D> CropTextureOverrides = new();
     private static readonly HashSet<int> OverriddenDryFieldTextureIds = new();
     private static int _desertShaderPropertyId = -1;
+    private static int _wetFieldShaderPropertyId = -1;
     private static int _dryFieldShaderPropertyId = -1;
     private static bool _terrainShaderPropertyLookupAttempted;
     private static bool _dryGroundRenderDiagnosticWritten;
@@ -151,6 +182,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
     {
         yield return new WaitForSecondsRealtime(SceneLoadDelaySeconds);
         yield return PrepareTreeTextureOverrides();
+        yield return PrepareCropTextureOverrides();
         ApplyTextureQuality();
         ApplyMaterialOverrides();
         WriteTextureInventory();
@@ -258,11 +290,14 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             if (material.shader.name == DirtShaderName
                 && material.HasProperty(DirtTextureProperty))
             {
+                var materialName = material.name.Replace(" (Instance)", string.Empty);
                 var currentTexture = material.GetTexture(DirtTextureProperty);
                 if (_soilAlbedo != null
                     && currentTexture != _soilAlbedo
                     && currentTexture != null
-                    && currentTexture.name == OriginalDirtTextureName)
+                    && (currentTexture.name == OriginalDirtTextureName
+                        || (materialName == "Field"
+                            && currentTexture.name == OriginalGroundTextureName)))
                 {
                     material.SetTexture(DirtTextureProperty, _soilAlbedo);
                     changedMaterials++;
@@ -271,7 +306,8 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                 if (_dryGroundAlbedo != null
                     && currentTexture != _dryGroundAlbedo
                     && currentTexture != null
-                    && currentTexture.name == OriginalGroundTextureName)
+                    && currentTexture.name == OriginalGroundTextureName
+                    && materialName != "Field")
                 {
                     material.SetTexture(DirtTextureProperty, _dryGroundAlbedo);
                     changedMaterials++;
@@ -332,8 +368,10 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
             if (material.shader.name == VegetationShaderName)
             {
-                changedMaterials += ApplyTreeTextureOverride(material, VegetationAlbedoProperty);
-                changedMaterials += ApplyTreeTextureOverride(material, VegetationNormalProperty);
+                changedMaterials += ApplyVegetationTextureOverride(material, VegetationAlbedoProperty);
+                changedMaterials += ApplyVegetationTextureOverride(material, VegetationNormalProperty);
+                changedMaterials += ApplyVegetationTextureOverride(material, "_DetailMap");
+                changedMaterials += ApplyVegetationTextureOverride(material, "_MetallicGlossMap");
             }
         }
 
@@ -401,12 +439,19 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
 
         Texture? desertTextureBeforeBinding = null;
+        Texture? wetFieldTextureBeforeBinding = null;
         Texture? dryFieldTextureBeforeBinding = null;
 
         if (_desertShaderPropertyId >= 0)
         {
             desertTextureBeforeBinding = Shader.GetGlobalTexture(_desertShaderPropertyId);
             Shader.SetGlobalTexture(_desertShaderPropertyId, _dryGroundAlbedo);
+        }
+
+        if (_wetFieldShaderPropertyId >= 0 && _soilAlbedo != null)
+        {
+            wetFieldTextureBeforeBinding = Shader.GetGlobalTexture(_wetFieldShaderPropertyId);
+            Shader.SetGlobalTexture(_wetFieldShaderPropertyId, _soilAlbedo);
         }
 
         if (_dryFieldShaderPropertyId >= 0)
@@ -419,6 +464,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         {
             WriteDryGroundGlobalDiagnostics(
                 desertTextureBeforeBinding,
+                wetFieldTextureBeforeBinding,
                 dryFieldTextureBeforeBinding,
                 cameraName);
         }
@@ -437,13 +483,17 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             _desertShaderPropertyId = ResolveShaderPropertyId(
                 terrainMaterialMapType,
                 "DesertTextureProperty");
+            _wetFieldShaderPropertyId = ResolveShaderPropertyId(
+                terrainMaterialMapType,
+                "WetFieldTextureProperty");
             _dryFieldShaderPropertyId = ResolveShaderPropertyId(
                 terrainMaterialMapType,
                 "DryFieldTextureProperty");
 
             Debug.Log(
                 $"[Timberborn HD] Resolved terrain shader properties: "
-                + $"Desert={_desertShaderPropertyId}, DryField={_dryFieldShaderPropertyId}.");
+                + $"Desert={_desertShaderPropertyId}, WetField={_wetFieldShaderPropertyId}, "
+                + $"DryField={_dryFieldShaderPropertyId}.");
         }
         catch (System.Exception exception)
         {
@@ -464,12 +514,15 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
     private static void WriteDryGroundGlobalDiagnostics(
         Texture? desertTextureBeforeBinding,
+        Texture? wetFieldTextureBeforeBinding,
         Texture? dryFieldTextureBeforeBinding,
         string cameraName)
     {
         if (string.IsNullOrWhiteSpace(_modPath)
             || _dryGroundAlbedo == null
-            || (_desertShaderPropertyId < 0 && _dryFieldShaderPropertyId < 0))
+            || (_desertShaderPropertyId < 0
+                && _wetFieldShaderPropertyId < 0
+                && _dryFieldShaderPropertyId < 0))
         {
             return;
         }
@@ -482,6 +535,9 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             var dryFieldTextureAfterBinding = _dryFieldShaderPropertyId >= 0
                 ? Shader.GetGlobalTexture(_dryFieldShaderPropertyId)
                 : null;
+            var wetFieldTextureAfterBinding = _wetFieldShaderPropertyId >= 0
+                ? Shader.GetGlobalTexture(_wetFieldShaderPropertyId)
+                : null;
             var diagnostic = new StringBuilder();
             diagnostic.Append("Camera=").AppendLine(cameraName);
             diagnostic.Append("Requested=").AppendLine(DescribeTexture(_dryGroundAlbedo));
@@ -490,6 +546,12 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             diagnostic.Append("DesertAfter=").AppendLine(DescribeTexture(desertTextureAfterBinding));
             diagnostic.Append("DesertBoundImmediatelyBeforeRender=")
                 .AppendLine((desertTextureAfterBinding == _dryGroundAlbedo).ToString());
+            diagnostic.Append("WetFieldRequested=").AppendLine(DescribeTexture(_soilAlbedo));
+            diagnostic.Append("WetFieldPropertyId=").AppendLine(_wetFieldShaderPropertyId.ToString());
+            diagnostic.Append("WetFieldBefore=").AppendLine(DescribeTexture(wetFieldTextureBeforeBinding));
+            diagnostic.Append("WetFieldAfter=").AppendLine(DescribeTexture(wetFieldTextureAfterBinding));
+            diagnostic.Append("WetFieldBoundImmediatelyBeforeRender=")
+                .AppendLine((wetFieldTextureAfterBinding == _soilAlbedo).ToString());
             diagnostic.Append("DryFieldPropertyId=").AppendLine(_dryFieldShaderPropertyId.ToString());
             diagnostic.Append("DryFieldBefore=").AppendLine(DescribeTexture(dryFieldTextureBeforeBinding));
             diagnostic.Append("DryFieldAfter=").AppendLine(DescribeTexture(dryFieldTextureAfterBinding));
@@ -501,7 +563,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
                 diagnostic.ToString());
             _dryGroundRenderDiagnosticWritten = true;
             Debug.Log(
-                "[Timberborn HD] Reasserted the HD desert and dry-field textures before camera rendering.");
+                "[Timberborn HD] Reasserted HD desert, wet-soil, and dry-field textures before rendering.");
         }
         catch (System.Exception exception)
         {
@@ -517,7 +579,7 @@ public sealed class GraphicsEnhancer : MonoBehaviour
             : $"{texture.name}|{texture.width}x{texture.height}|InstanceId={texture.GetInstanceID()}";
     }
 
-    private static int ApplyTreeTextureOverride(Material material, string propertyName)
+    private static int ApplyVegetationTextureOverride(Material material, string propertyName)
     {
         if (!material.HasProperty(propertyName))
         {
@@ -525,9 +587,18 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
 
         var currentTexture = material.GetTexture(propertyName);
-        if (currentTexture == null
-            || !TreeTextureOverrides.TryGetValue(currentTexture.name, out var replacement)
-            || currentTexture == replacement)
+        if (currentTexture == null)
+        {
+            return 0;
+        }
+
+        if (!TreeTextureOverrides.TryGetValue(currentTexture.name, out var replacement)
+            && !CropTextureOverrides.TryGetValue(currentTexture.name, out replacement))
+        {
+            return 0;
+        }
+
+        if (currentTexture == replacement)
         {
             return 0;
         }
@@ -566,6 +637,62 @@ public sealed class GraphicsEnhancer : MonoBehaviour
         }
 
         Debug.Log($"[Timberborn HD] Prepared {preparedTextures} runtime 2K tree atlases.");
+    }
+
+    private static IEnumerator PrepareCropTextureOverrides()
+    {
+        var cropMaterials = Resources.FindObjectsOfTypeAll<Material>()
+            .Where(material => material != null
+                               && material.shader != null
+                               && material.shader.name == VegetationShaderName
+                               && CropMaterialNames.Contains(NormalizeMaterialName(material.name)))
+            .ToArray();
+        var preparedTextures = 0;
+
+        foreach (var material in cropMaterials)
+        {
+            foreach (var textureProperty in CropTextureProperties)
+            {
+                if (!material.HasProperty(textureProperty.PropertyName))
+                {
+                    continue;
+                }
+
+                var source = material.GetTexture(textureProperty.PropertyName) as Texture2D;
+                if (source == null
+                    || source.width >= 2048
+                    || source.height >= 2048
+                    || CropTextureOverrides.ContainsKey(source.name))
+                {
+                    continue;
+                }
+
+                var replacement = CreateUpscaledTexture(
+                    source,
+                    $"TimberbornHD_Crop_{source.name}_2K",
+                    textureProperty.Linear,
+                    textureProperty.SharpenAlbedo,
+                    textureProperty.NormalizeNormals);
+                CropTextureOverrides.Add(source.name, replacement);
+                preparedTextures++;
+                yield return null;
+            }
+        }
+
+        Debug.Log($"[Timberborn HD] Prepared {preparedTextures} runtime 2K crop atlases.");
+    }
+
+    private static string NormalizeMaterialName(string materialName)
+    {
+        var normalizedName = materialName.Replace(" (Instance)", string.Empty);
+        var uncoloredSuffix = normalizedName.IndexOf(" - Uncolored", System.StringComparison.Ordinal);
+        if (uncoloredSuffix >= 0)
+        {
+            normalizedName = normalizedName.Substring(0, uncoloredSuffix);
+        }
+
+        var factionSuffix = normalizedName.IndexOf('.');
+        return factionSuffix >= 0 ? normalizedName.Substring(0, factionSuffix) : normalizedName;
     }
 
     private static Texture2D CreateUpscaledTexture(
@@ -712,6 +839,26 @@ public sealed class GraphicsEnhancer : MonoBehaviour
 
         public string SourceName { get; }
         public string ReplacementName { get; }
+        public bool Linear { get; }
+        public bool SharpenAlbedo { get; }
+        public bool NormalizeNormals { get; }
+    }
+
+    private readonly struct CropTextureProperty
+    {
+        public CropTextureProperty(
+            string propertyName,
+            bool linear,
+            bool sharpenAlbedo,
+            bool normalizeNormals)
+        {
+            PropertyName = propertyName;
+            Linear = linear;
+            SharpenAlbedo = sharpenAlbedo;
+            NormalizeNormals = normalizeNormals;
+        }
+
+        public string PropertyName { get; }
         public bool Linear { get; }
         public bool SharpenAlbedo { get; }
         public bool NormalizeNormals { get; }

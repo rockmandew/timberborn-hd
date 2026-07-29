@@ -17,6 +17,12 @@ milestone improves texture sampling without replacing the game's art:
 - replacement of both Timberborn's natural `DesertTexture` channel and its
   agricultural `DryField` channel, reasserted immediately before every camera
   render while preserving badwater contamination.
+- 2K cultivated-soil replacement for field meshes and the global wet-field
+  channel.
+- targeted 2K runtime enhancement of loaded food-crop albedo, normal, detail,
+  and material atlases, while retaining native maps that are already 2K or 4K.
+- crop discovery for both factions, including berries, carrots, potatoes,
+  wheat, sunflowers, aquatic crops, and Iron Teeth food plants.
 - targeted runtime replacement of DirtURP and TerrainURP texture bindings.
 
 This is the foundation for later high-resolution PBR texture packs, material
